@@ -61,6 +61,8 @@ from wildlifecompliance.components.artifact.models import (
         PhysicalArtifactType,
         PhysicalArtifactDisposalMethod,
         ArtifactUserAction,
+        PhysicalArtifactDetailsFormDataRecord,
+        PhysicalArtifactStorageFormDataRecord,
         )
 from wildlifecompliance.components.artifact.serializers import (
         ArtifactSerializer,
@@ -325,6 +327,44 @@ class PhysicalArtifactViewSet(viewsets.ModelViewSet):
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
 
+    @detail_route(methods=['post'])
+    @renderer_classes((JSONRenderer,))
+    def storage_form_data(self, request_data, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            
+            PhysicalArtifactStorageFormDataRecord.process_form(
+                instance,
+                request_data.get('storage_renderer_data'),
+                action=PhysicalArtifactStorageFormDataRecord.ACTION_TYPE_ASSIGN_VALUE
+            )
+            return redirect(reverse('external'))
+        
+        except ValidationError as e:
+            raise serializers.ValidationError(repr(e.error_dict))
+        except Exception as e:
+            print(traceback.print_exc())
+        raise serializers.ValidationError(str(e))
+
+    @detail_route(methods=['post'])
+    @renderer_classes((JSONRenderer,))
+    def details_form_data(self, request_data, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            
+            PhysicalArtifactDetailsFormDataRecord.process_form(
+                instance,
+                request_data.get('details_renderer_data'),
+                action=PhysicalArtifactDetailsFormDataRecord.ACTION_TYPE_ASSIGN_VALUE
+            )
+            return redirect(reverse('external'))
+        
+        except ValidationError as e:
+            raise serializers.ValidationError(repr(e.error_dict))
+        except Exception as e:
+            print(traceback.print_exc())
+        raise serializers.ValidationError(str(e))
+
     def common_save(self, request_data, instance=None):
         try:
             with transaction.atomic():
@@ -364,6 +404,12 @@ class PhysicalArtifactViewSet(viewsets.ModelViewSet):
                     # save temp doc if exists
                     if request_data.get('temporary_document_collection_id'):
                         self.handle_document(request_data, instance)
+                    # save details renderer data
+                    if request_data.get('details_renderer_data'):
+                        self.details_form_data(request_data)
+                    # save storage renderer data
+                    if request_data.get('storage_renderer_data'):
+                        self.storage_form_data(request_data)
                     return (instance, headers)
         except serializers.ValidationError:
             print(traceback.print_exc())

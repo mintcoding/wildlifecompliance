@@ -91,6 +91,7 @@ export const rendererStore = {
             Vue.set(state.visibility, 'exclude_decisions', visible ? [] : ['issued', 'declined']);
         },
         [UPDATE_FORM_DATA] (state, form_data) {
+            console.log("update form data")
             if(form_data == null) {
                 Vue.set(state, 'form_data', {});
             }
@@ -99,6 +100,7 @@ export const rendererStore = {
             }
         },
         [UPDATE_FORM_FIELD] (state, { key, value }) {
+            console.log("update form data")
             let currentValue = state.form_data[key] ? {...state.form_data[key]} : {};
             for(let idx in value) {
                 currentValue[idx] = value[idx];
@@ -127,6 +129,7 @@ export const rendererStore = {
             commit(UPDATE_FORM_DATA, form_data);
         },
         setFormValue({ commit }, params) {
+            console.log("set form data")
             commit(UPDATE_FORM_FIELD, params);
         },
         removeFormInstance({ state, commit }, instanceId) {

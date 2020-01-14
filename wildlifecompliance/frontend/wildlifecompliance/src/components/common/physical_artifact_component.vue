@@ -136,10 +136,10 @@
                                         <FormSection :formCollapse="false" label="Checklist">
                                             <div class="col-sm-12 form-group"><div class="row">
                                                 <div v-if="detailsSchemaVisibility" v-for="(item, index) in detailsSchema">
-                                                  <compliance-renderer-block
+                                                  <PhysicalArtifactRendererBlock
                                                      :component="item"
                                                      :readonlyForm="readonlyForm"
-                                                     v-bind:key="`compliance_renderer_block${index}`"
+                                                     v-bind:key="`details_renderer${index}`"
                                                     />
                                                 </div>
                                             </div></div>
@@ -149,10 +149,10 @@
                                         <FormSection :formCollapse="false" label="Checklist">
                                             <div class="col-sm-12 form-group"><div class="row">
                                                 <div v-if="storageSchemaVisibility" v-for="(item, index) in storageSchema">
-                                                  <compliance-renderer-block
+                                                  <PhysicalArtifactRendererBlock
                                                      :component="item"
                                                      :readonlyForm="readonlyForm"
-                                                     v-bind:key="`compliance_renderer_block${index}`"
+                                                     v-bind:key="`storage_renderer${index}`"
                                                     />
                                                 </div>
                                             </div></div>
@@ -241,6 +241,7 @@ import SearchPersonOrganisation from './search_person_or_organisation'
 import FormSection from "@/components/forms/section_toggle.vue";
 import RelatedItems from "@common-components/related_items.vue";
 import datatable from '@vue-utils/datatable.vue'
+import PhysicalArtifactRendererBlock from "@common-components/physical_artifact_renderer_block.vue";
 
 export default {
     name: "PhysicalArtifactComponent",
@@ -372,6 +373,7 @@ export default {
       FormSection,
       RelatedItems,
       datatable,
+      PhysicalArtifactRendererBlock,
     },
     props: {
         parentModal: {
@@ -400,6 +402,11 @@ export default {
         ...mapGetters('legalCaseStore', {
             legal_case: "legal_case",
         }),
+        /*
+        ...mapGetters({
+            renderer_form_data: 'renderer_form_data'
+        }),
+        */
         detailsSchemaVisibility: function() {
             console.log("detailsSchemaVisibility")
             if (this.detailsSchema && this.detailsSchema.length > 0) {
