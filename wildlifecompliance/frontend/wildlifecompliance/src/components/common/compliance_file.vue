@@ -18,18 +18,30 @@
 
             <div v-if="files">
                 <div v-for="v in documents">
-                    <p>
-                        File: <a :href="v.file" target="_blank">{{v.name}}</a> &nbsp;
-                        <span v-if="!readonly">
-                            <a @click="delete_document(v)" class="fa fa-trash-o" title="Remove file" :filename="v.name" style="cursor: pointer; color:red;"></a>
-                        </span>
-                    </p>
+                    <div class="col-sm-12 form-group"><div class="row">
+                        <div class="col-sm-4">
+                            <input class="form-control" :name="optionalName" type="text"/>
+                        </div>
+                        <div class="col-sm-5">
+                            File: <a :href="v.file" target="_blank">{{v.name}}</a> &nbsp;
+                            <span v-if="!readonly">
+                                <a @click="delete_document(v)" class="fa fa-trash-o" title="Remove file" :filename="v.name" style="cursor: pointer; color:red;"></a>
+                            </span>
+                        </div>
+                    </div></div>
                 </div>
                 <div v-if="show_spinner"><i class='fa fa-2x fa-spinner fa-spin'></i></div>
             </div>
             <div v-if="!readonly" v-for="n in repeat">
                 <div v-if="isRepeatable || (!isRepeatable && num_documents()==0)">
-                    <input :name="name" type="file" :data-que="n" :accept="fileTypes" @change="handleChangeWrapper"/>
+                    <div class="col-sm-12 form-group"><div class="row">
+                        <div class="col-sm-4">
+                            <input class="form-control" :name="optionalName" type="text" @input="updateOptionalLabel"/>
+                        </div>
+                        <div class="col-sm-4">
+                            <input :name="name" type="file" :data-que="n" :accept="fileTypes" @change="handleChangeWrapper"/>
+                        </div>
+                    </div></div>
                 </div>
             </div>
 
@@ -94,6 +106,9 @@ export default {
         csrf_token: function() {
             return helpers.getCookie('csrftoken')
         },
+        optionalName: function() {
+            return this.name + '_optional_name';
+        },
         document_action_url: function() {
             let url = ''
             if (this.documentActionUrl == 'temporary_document') {
@@ -118,7 +133,11 @@ export default {
     },
 
     methods:{
+        updateOptionalLabel: function(e) {
+            console.log(e)
+        },
         handleChange: function (e) {
+            console.log(e)
             let vm = this;
 
             if (vm.isRepeatable && e.target.files) {
@@ -127,7 +146,6 @@ export default {
                 avail = [...avail.map(id => {
                     return $(avail[id]).attr('data-que');
                 })];
-                console.log(avail);
                 avail.pop();
                 if (vm.repeat == 1) {
                     vm.repeat+=1;
