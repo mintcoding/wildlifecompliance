@@ -35,7 +35,7 @@ from '@/utils/hooks';
 import '@/scss/dashboards/application.scss';
 import datatable from '@vue-utils/datatable.vue';
 import ConditionDetail from './application_add_condition.vue';
-import { mapGetters } from 'vuex';
+import { mapActions, mapGetters } from 'vuex'
 export default {
     name: 'InternalApplicationConditions',
     props: {
@@ -73,7 +73,7 @@ export default {
                     {
                         data: "condition",
                         mRender:function (data,type,full) {
-                            return data.substring(0, 80)
+                            return data ? data.substring(0, 80) : ''
                         },
                         orderable: false
                     },
@@ -115,9 +115,10 @@ export default {
                         orderable: false
                     },
                     {
+                        data: "source_group",
                         mRender:function (data,type,full) {
                             let links = '';
-                            if(full.source_group) {
+                            if(full.source_group && vm.activity.processing_status.id !== 'with_officer_finalisation') {
                                 links = `
                                     <a href='#' class="editCondition" data-id="${full.id}">Edit</a><br/>
                                     <a href='#' class="deleteCondition" data-id="${full.id}">Delete</a><br/>
@@ -134,6 +135,7 @@ export default {
                         orderable: false
                     },
                     {
+                        data: "id",
                         mRender:function (data,type,full) {
                             let links = '';
                             if(vm.canEditConditions) {
@@ -146,6 +148,12 @@ export default {
                     }
                 ],
                 processing: true,
+                rowCallback: function ( row, data, index) {
+                    if (data.return_type && !data.due_date) {
+                        $('td', row).css('background-color', 'Red');
+                        vm.setApplicationWorkflowState({bool: true})
+                    }
+                },
                 drawCallback: function (settings) {
                     if(vm.$refs.conditions_datatable) {
                         $(vm.$refs.conditions_datatable.table).find('tr:last .dtMoveDown').remove();
@@ -157,6 +165,9 @@ export default {
                     // Bind clicks to functions
                     $('.dtMoveUp').click(vm.moveUp);
                     $('.dtMoveDown').click(vm.moveDown);
+                },
+                preDrawCallback: function (settings) {
+                    vm.setApplicationWorkflowState({bool: false})
                 }
             }
         }
@@ -176,6 +187,7 @@ export default {
             'canEditAssessmentFor',
             'current_user',
             'canAssignOfficerFor',
+            'application_workflow_state',
         ]),
         canAddConditions: function() {
             if(!this.selected_activity_tab_id || this.activity == null) {
@@ -183,19 +195,31 @@ export default {
             }
 
             let required_role = false;
-            switch(this.activity.processing_status.id) {
-                case 'with_assessor':
-                    let assessment = this.canEditAssessmentFor(this.selected_activity_tab_id)
-                    required_role = assessment && assessment.assessors.find(assessor => assessor.id === this.current_user.id) ? 'assessor' : false;
-                break;
-                case 'with_officer_conditions':
-                    required_role =  this.canAssignOfficerFor(this.selected_activity_tab_id) ? 'licensing_officer' : false;
-                break;
+            if (this.activity.processing_status.id === 'with_assessor') {
+                let assessment = this.canEditAssessmentFor(this.selected_activity_tab_id)
+                required_role = assessment && assessment.assessors.find(assessor => assessor.id === this.current_user.id) ? 'assessor' : false;
+
+            } else if (this.activity.processing_status.id === 'with_officer') {
+                required_role =  this.canAssignOfficerFor(this.selected_activity_tab_id) ? 'licensing_officer' : false;
+            } else if (this.activity.processing_status.id === 'with_officer_conditions') {
+                required_role =  this.canAssignOfficerFor(this.selected_activity_tab_id) ? 'licensing_officer' : false;
             }
+
+            // switch(this.activity.processing_status.id) {
+            //     case 'with_assessor':
+            //         console.log('with_assessor')
+            //         let assessment = this.canEditAssessmentFor(this.selected_activity_tab_id)
+            //         required_role = assessment && assessment.assessors.find(assessor => assessor.id === this.current_user.id) ? 'assessor' : false;
+            //     break;
+            //     case 'with_officer_conditions':
+            //         console.log('with_officer_condit')
+            //         required_role =  this.canAssignOfficerFor(this.selected_activity_tab_id) ? 'licensing_officer' : false;
+            //     break;
+            // }
+      
             return required_role && this.hasRole(required_role, this.selected_activity_tab_id);
         },
         canEditConditions: function() {
-            console.log('canEditConditions')
             if(!this.selected_activity_tab_id || this.activity == null) {
                 return false;
             }
@@ -216,10 +240,15 @@ export default {
         },
     },
     methods:{
+        ...mapActions([
+            'setApplicationWorkflowState',
+        ]),
         addCondition(preloadedCondition){
+            var showDueDate = false
             if(preloadedCondition) {
                 this.viewedCondition = preloadedCondition;
                 this.viewedCondition.due_date = preloadedCondition.due_date != null ? moment(preloadedCondition.due_date).format('DD/MM/YYYY'): '';
+                showDueDate=this.viewedCondition.require_return
             }
             else {
                 this.viewedCondition = {
@@ -231,6 +260,7 @@ export default {
                     application: this.application.id
                 };
             }
+            this.$refs.condition_detail.showDueDate = showDueDate
             this.$refs.condition_detail.licence_activity = this.selected_activity_tab_id;
             this.$refs.condition_detail.isModalOpen = true;
         },
@@ -255,9 +285,9 @@ export default {
             },(error) => {
             });
         },
-        fetchConditions(){
+        async fetchConditions(){
             let vm = this;
-            vm.$http.get(api_endpoints.application_standard_conditions).then((response) => {
+            await vm.$http.get(api_endpoints.application_standard_conditions).then((response) => {
                 vm.conditions = response.body
             },(error) => {
                 console.log(error);
@@ -270,9 +300,9 @@ export default {
             });
             this.purposes = selectedActivity.purposes;
         },
-        editCondition(_id){
+        async editCondition(_id){
             let vm = this;
-            vm.$http.get(helpers.add_endpoint_json(api_endpoints.application_conditions,_id)).then((response) => {
+            await vm.$http.get(helpers.add_endpoint_json(api_endpoints.application_conditions,_id)).then((response) => {
                 response.body.standard ? $(this.$refs.condition_detail.$refs.standard_req).val(response.body.standard_condition).trigger('change'): '';
                 this.addCondition(response.body);
             },(error) => {
@@ -308,33 +338,33 @@ export default {
                 vm.moveDown(e);
             });
         },
-        sendDirection(req,direction){
+        async sendDirection(req,direction){
             let movement = direction == 'down'? 'move_down': 'move_up';
-            this.$http.get(helpers.add_endpoint_json(api_endpoints.application_conditions,req+'/'+movement)).then((response) => {
+            await this.$http.get(helpers.add_endpoint_json(api_endpoints.application_conditions,req+'/'+movement)).then((response) => {
             },(error) => {
                 console.log(error);
                 
             })
         },
-        moveUp(e) {
+        async moveUp(e) {
             // Move the row up
             let vm = this;
             e.preventDefault();
             var tr = $(e.target).parents('tr');
-            if (vm.moveRow(tr, 'up')){
-                vm.sendDirection($(e.target).parent().data('id'),'up');
+            if (await vm.moveRow(tr, 'up')){
+                await vm.sendDirection($(e.target).parent().data('id'),'up');
             }
         },
-        moveDown(e) {
+        async moveDown(e) {
             // Move the row down
             e.preventDefault();
             let vm = this;
             var tr = $(e.target).parents('tr');
-            if (vm.moveRow(tr, 'down')){
-                vm.sendDirection($(e.target).parent().data('id'),'down');
+            if (await vm.moveRow(tr, 'down')){
+                await vm.sendDirection($(e.target).parent().data('id'),'down');
             }
         },
-        moveRow(row, direction) {
+        async moveRow(row, direction) {
             // Move up or down (depending...)
             const table = this.$refs.conditions_datatable.vmDataTable;
             let index = row[0].sectionRowIndex - 1;

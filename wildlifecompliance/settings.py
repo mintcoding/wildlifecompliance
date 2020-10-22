@@ -6,10 +6,46 @@ os.environ.setdefault("BASE_DIR", BASE_DIR)
 from django.core.exceptions import ImproperlyConfigured
 from ledger.settings_base import *
 
+os.environ['LEDGER_PRODUCT_CUSTOM_FIELDS'] = "('ledger_description','quantity','price_incl_tax','price_excl_tax','oracle_code')"
+os.environ['LEDGER_REFUND_TRANSACTION_CALLBACK_MODULE'] = 'wildlifecompliance:wildlifecompliance.components.applications.api.application_refund_callback'
+os.environ['LEDGER_INVOICE_TRANSACTION_CALLBACK_MODULE'] = 'wildlifecompliance:wildlifecompliance.components.applications.api.application_invoice_callback'
+
 ROOT_URLCONF = 'wildlifecompliance.urls'
 SITE_ID = 1
 
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles_wc')
+SHOW_DEBUG_TOOLBAR = env('SHOW_DEBUG_TOOLBAR', False)
+
+if SHOW_DEBUG_TOOLBAR:
+#    def get_ip():
+#        import subprocess
+#        route = subprocess.Popen(('ip', 'route'), stdout=subprocess.PIPE)
+#        network = subprocess.check_output(
+#            ('grep', '-Po', 'src \K[\d.]+\.'), stdin=route.stdout
+#        ).decode().rstrip()
+#        route.wait()
+#        network_gateway = network + '1'
+#        return network_gateway
+
+    def show_toolbar(request):
+        return True
+
+    MIDDLEWARE_CLASSES += [
+        'debug_toolbar.middleware.DebugToolbarMiddleware',
+    ]
+    INSTALLED_APPS += (
+        'debug_toolbar',
+    )
+    #INTERNAL_IPS = ('127.0.0.1', 'localhost', get_ip())
+    INTERNAL_IPS = ('127.0.0.1', 'localhost')
+
+    # this dict removes check to dtermine if toolbar should display --> works for rks docker container
+    DEBUG_TOOLBAR_CONFIG = {
+        "SHOW_TOOLBAR_CALLBACK" : show_toolbar,
+        'INTERCEPT_REDIRECTS': False,
+    }
+
+STATIC_URL = '/static/'
 
 INSTALLED_APPS += [
     'reversion_compare',
@@ -154,6 +190,8 @@ SYSTEM_EMAIL = env('SYSTEM_EMAIL', 'wildlifelicensing@dbca.wa.gov.au')
 WC_PAYMENT_SYSTEM_ID = env('WC_PAYMENT_SYSTEM_ID', 'S566')
 WC_PAYMENT_SYSTEM_PREFIX = env('PAYMENT_SYSTEM_PREFIX', WC_PAYMENT_SYSTEM_ID.replace('S', '0'))
 PS_PAYMENT_SYSTEM_ID = WC_PAYMENT_SYSTEM_ID
+WC_PAYMENT_SYSTEM_URL_PDF = env('WC_PAYMENT_SYSTEM_URL_PDF', '/ledger/payments/invoice-pdf/')
+WC_PAYMENT_SYSTEM_URL_INV = env('WC_PAYMENT_SYSTEM_URL_INV', '/ledger/payments/invoice/')
 
 COLS_ADMIN_GROUP = env('COLS_ADMIN_GROUP', 'COLS Admin')
 if not VALID_SYSTEMS:
@@ -183,7 +221,8 @@ DOT_EMAIL_ADDRESS = env('DOT_EMAIL_ADDRESS')
 # Details for Threathened Species and Communities server.
 TSC_URL = env('TSC_URL', 'https://tsc.dbca.wa.gov.au')
 TSC_AUTH = env('TSC_AUTH', 'NO_AUTH')
-CRON_RUN_AT_TIMES = '03:05'
+CRON_RUN_AT_TIMES = env('CRON_RUN_AT_TIMES', '02:05')
 
 # if DEBUG:
 #     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+#

@@ -10,13 +10,16 @@
                             <div class="col-md-3">
                                 <label class="control-label pull-left" >Activity:</label>
                             </div>
-                            <div class="col-md-6" v-show="isAddEntry">
+                            <div class="col-md-3" v-if="isStockEntry">
+                                <label>{{activityList[entryActivity]['label']}}</label>
+                            </div>
+                            <div class="col-md-6" v-if="isAddEntry && !isStockEntry">
                                 <select class="form-control" v-model="entryActivity">
-                                    <option v-for="(activity, activityId) in activityList" v-if="activity['auto']=='false'" :value="activityId">{{activity['label']}}</option>
+                                    <option v-for="(activity, activityId) in filteredActivityList" v-if="activity['auto']=='false'" :value="activityId">{{activity['label']}}</option>
                                 </select>
                             </div>
-                            <div class="col-md-3" v-show="isChangeEntry">
-                                <label>{{activityList[entryActivity]['label']}} </label>
+                            <div class="col-md-3" v-if="isChangeEntry && !isStockEntry">
+                                <label>{{filteredActivityList[entryActivity]['label']}} </label>
                             </div>
                         </div>
                         <div class="row">
@@ -39,8 +42,25 @@
                             <div class="col-md-3">
                                 <label class="control-label pull-left" >Receiving licence:</label>
                             </div>
-                            <div class="col-md-3">
+                            <!-- <div class="col-md-3">  Replaced with Keeper
                                 <input type='text' v-model='entryLicence' >
+                            </div> -->
+                        </div>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <label class="control-label pull-left" >Name of Supplier/Recipient:</label>
+                            </div>
+                            <div class="col-md-9">
+                                <input style="width: 95%;" type='text' v-model='entrySupplier' >
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <label class="control-label pull-left" >Keeper, Import or Export</label>
+                                <label>Licence number:</label>
+                            </div>
+                            <div class="col-md-9">
+                                <input style="width: 95%;" type='text' v-model='entryLicence' >
                             </div>
                         </div>
                         <div class="row">
@@ -57,7 +77,7 @@
             </div>
             <div slot="footer">
                 <button v-show="!isPayable" style="width:150px;" class="btn btn-primary" @click.prevent="update()">Update</button>
-                <button v-show="isPayable" style="width:150px;" class="btn btn-primary" >Pay</button>
+                <button v-show="isPayable" style="width:150px;" class="btn btn-primary" @click.prevent="check_and_pay()">Pay</button>
                 <button style="width:150px;" class="btn btn-primary" @click.prevent="cancel()">Cancel</button>
             </div>
         </modal>
@@ -100,6 +120,7 @@ export default {
         entryLicence: '',
         entryComment: '',
         entryTransfer: '',
+        entrySupplier: '',
         currentStock: 0,
         speciesType: '',
         row_of_data: null,
@@ -137,6 +158,17 @@ export default {
       isPayable: function() {
         return (this.returns.sheet_activity_list[this.entryActivity]['pay'] === 'true');
       },
+      isStockEntry: function() {
+        return this.entryActivity==='stock'?true:false;
+      },
+      filteredActivityList: function() {
+        let filteredList = Object.assign({}, this.activityList)
+        if (filteredList['stock'] && !this.isStockEntry) {
+          delete filteredList['stock']
+        }
+  
+        return filteredList
+      }
     },
     methods:{
       isOutStock: function(activity) {
@@ -180,11 +212,14 @@ export default {
                         comment: self.entryComment,
                         licence: self.entryLicence,
                         transfer: self.entryTransfer,
+                        supplier: self.entrySupplier,
                       };
 
           if (self.isLicenceRequired) { // licence only required for transfers.
 
-              self.validateTransfer(_data)
+              if (self.validateTransfer(_data)){
+                self.close();
+              }
 
           } else {
 
@@ -205,10 +240,13 @@ export default {
           _data.licence = self.entryLicence;
           _data.comment = self.entryComment;
           _data.transfer = self.entryTransfer;
+          _data.supplier = self.entrySupplier;
 
           if (self.isLicenceRequired) { // licence only required for transfers.
 
-              self.validateTransfer(_data);
+              if (self.validateTransfer(_data)){
+                self.close();
+              }
 
           } else {
 
@@ -222,28 +260,64 @@ export default {
         };
 
       },
-      pay: function() {
+      check_and_pay: async function() {
         const self = this;
         self.form=document.forms.external_returns_form;
         var data = new FormData(self.form);
+        let is_valid_transfer = false
 
-        //  data.append(speciesID, speciesJSON)
+        if (self.isAddEntry) {
 
-        self.$http.post(helpers.add_endpoint_json(api_endpoints.returns,self.returns.id+'/pay'),data,{
+          let _currentDateTime = new Date();
+          self.entryDateTime = Date.parse(new Date());
+          let newRowId = (self.row_of_data.data().count()) + '';
+
+          var _data = { rowId: newRowId,
+                        date: self.entryDateTime,
+                        activity: self.entryActivity,
+                        qty: self.entryQty,
+                        total: self.entryTotal,
+                        comment: self.entryComment,
+                        licence: self.entryLicence,
+                        transfer: self.entryTransfer,
+                        supplier: self.entrySupplier,
+                      };
+
+
+          if (self.isLicenceRequired) { // licence only required for transfers.
+
+              is_valid_transfer = await self.validateTransfer(_data)
+              is_paid = await self.payTransfer(_data)
+
+          } else {
+
+              self.row_of_data.row.add(_data).node().id = newRowId;
+              self.row_of_data.draw();
+              self.species_cache[self.returns.sheet_species] = self.return_table.data();
+              self.close();
+          }
+
+        };
+      },
+      payTransfer: async function(_data) {
+        this.$http.post(helpers.add_endpoint_json(api_endpoints.returns,this.returns.id+'/sheet_pay_transfer'),_data,{
                       emulateJSON:true,
                     }).then((response)=>{
-                       //let species_id = this.returns.sheet_species;
-                       //this.setReturns(response.body);
-                       //this.returns.sheet_species = species_id;
-                       swal('Save',
-                            'Return Details Paid',
-                            'success'
-                       );
+                            window.location.href = "/ledger/checkout/checkout/payment-details/";
+                      //let species_id = this.returns.sheet_species;
+                      //this.setReturns(response.body);
+                      //this.returns.sheet_species = species_id;
                     },(error)=>{
-                        console.log(error);
+                      console.log(error);
+                      swal('Error',
+                            'There was an error with transferring.<br/>' + error.body,
+                            'error'
+                      )
         });
+
+        return true
       },
-      validateTransfer: function(row_data) {
+      validateTransfer: async function(row_data) {
         const self = this;
         self.form=document.forms.external_returns_form;
         self.errors = false;
@@ -270,6 +344,7 @@ export default {
                             self.row_of_data.data().licence = self.entryLicence;
                             self.row_of_data.data().comment = self.entryComment;
                             self.row_of_data.data().transfer = self.entryTransfer;
+                            self.row_of_data.data().supplier = self.entrySupplier;
                             self.row_of_data.invalidate().draw()
                             self.species_cache[self.returns.sheet_species] = self.return_table.data();
                         }
@@ -280,7 +355,8 @@ export default {
                         }
                         transfer[self.entryDateTime] = row_data;
                         self.species_transfer[self.returns.sheet_species] = transfer
-                        self.close()
+                        //self.close()
+                        is_valid = true;
 
                     },(error)=>{
                         console.log(error)
@@ -288,7 +364,7 @@ export default {
                         //self.errorString = helpers.apiVueResourceError('Licence is not Valid.');
                         self.errorString = 'Error with Validation'
         });
-        return true;
+        return is_valid;
       },
       cancel: function() {
         const self = this;

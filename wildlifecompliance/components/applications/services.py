@@ -3,8 +3,6 @@ import abc
 import requests
 import logging
 
-from decimal import Decimal
-
 from wildlifecompliance import settings
 
 from wildlifecompliance.components.licences.models import (
@@ -14,6 +12,14 @@ from wildlifecompliance.components.licences.models import (
 
 from wildlifecompliance.components.applications.payments import (
     ApplicationFeePolicy,
+    InvoiceClearable,
+)
+
+from wildlifecompliance.components.main.utils import (
+    get_session_application,
+    delete_session_application,
+    set_session_other_pay_method,
+    create_other_application_invoice,
 )
 
 from wildlifecompliance.components.applications.models import (
@@ -38,6 +44,69 @@ class ApplicationService(object):
 
     def __init__(self):
         pass
+
+    @staticmethod
+    def cash_payment_submission(request):
+        '''
+        Prepares licence application with cash payments.
+
+        :return: invoice reference.
+        '''
+        try:
+            application = get_session_application(request.session)
+            delete_session_application(request.session)
+
+            application.submit_type = Application.SUBMIT_TYPE_PAPER
+            application.save()
+            do_update_dynamic_attributes(application)
+
+            set_session_other_pay_method(
+                request.session, InvoiceClearable.TYPE_CASH
+            )
+            invoice = create_other_application_invoice(
+                application, request
+            )
+            invoice_ref = invoice.reference
+
+            # submit application if successful.
+            application.submit(request)
+
+        except Exception as e:
+            delete_session_application(request.session)
+            logger.error('Fail cash_payment_submission: {0}'.format(e))
+            raise Exception('Failed cash payment application submission.')
+
+        return invoice_ref
+
+    @staticmethod
+    def none_payment_submission(request):
+        '''
+        Prepares licence application with no base fee payment. Supports the
+        migration of previously paid licenses not in the system.
+        '''
+        invoice_ref = None          # No invoice reference created.
+        try:
+            application = get_session_application(request.session)
+            delete_session_application(request.session)
+
+            application.submit_type = Application.SUBMIT_TYPE_MIGRATE
+            application.application_fee = 0
+            has_fee_exemption = True
+            do_update_dynamic_attributes(application, has_fee_exemption)
+
+            logger.info(
+                'Zero amount payment submission for {0}'.format(
+                    application.id))
+
+            # submit application if successful.
+            application.submit(request)
+
+        except Exception as e:
+            delete_session_application(request.session)
+            logger.error('Fail none_payment_submission: {0}'.format(e))
+            raise Exception('Failed none payment application submission.')
+
+        return invoice_ref
 
     @staticmethod
     def get_licence_species(species_list):
@@ -84,11 +153,18 @@ class ApplicationService(object):
         """
         Verifies species name identifier is current with the TSC database.
         """
-        tsc_service = TSCSpecieService(TSCSpecieCall())
-        tsc_service.set_strategy(TSCSpecieXReferenceCall())
-        logger.info('ApplicationService: Verifying species.')
-        tsc_service.search_taxon(specie_id)
-        logger.info('ApplicationService: Completed. Verified 1 specie.')
+        try:
+            tsc_service = TSCSpecieService(TSCSpecieCall())
+            tsc_service.set_strategy(TSCSpecieXReferenceCall())
+            logger.info('ApplicationService: Verifying species.')
+            tsc_service.search_taxon(specie_id)
+            logger.info('ApplicationService: Completed. Verified 1 specie.')
+
+        except BaseException as e:
+            logger.error('ERR verify_licence_specie_id for {0} : {1}'.format(
+                specie_id,
+                e,
+            ))
 
     @staticmethod
     def calculate_fees(application, data_source):
@@ -102,6 +178,10 @@ class ApplicationService(object):
         checkbox = CheckboxAndRadioButtonVisitor(application, data_source)
         for_increase_fee_fields = IncreaseApplicationFeeFieldElement()
         for_increase_fee_fields.accept(checkbox)
+        # set fee exemption for migrations.
+        MIGRATE = Application.SUBMIT_TYPE_MIGRATE
+        fee_exempted = True if application.submit_type == MIGRATE else False
+        for_increase_fee_fields.set_has_fee_exemption(fee_exempted)
 
         return for_increase_fee_fields.get_adjusted_fees()
 
@@ -126,36 +206,23 @@ class ApplicationService(object):
             request,
             application,
             form_data,
-            action=ApplicationFormDataRecord.ACTION_TYPE_ASSIGN_VALUE)
+            action)
 
-    @staticmethod
-    def set_special_form_fields(application, form):
-        """
-        Set Special Form Field Attributes on an Application Form.
-        """
-        # Set form components to be visited.
-        checkbox = CheckboxAndRadioButtonVisitor(application, form)
-        text_area = TextAreaVisitor(application, form)
-
-        # Set PromptInspection Fields for Checkbox and RadioButtons.
-        for_inspection_fields = PromptInpsectionFieldElement()
-        for_inspection_fields.accept(checkbox)
-
-        # Set StandardCondition Fields for Checkbox and RadioButtons.
-        for_condition_fields = StandardConditionFieldElement()
-        for_condition_fields.accept(checkbox)
-
-        # Set copy-to-licence Fields which allow for additional terminologies
-        # to be dynamically added to the licence pdf.
-        for_copy_to_licence_fields = CopyToLicenceFieldElement()
-        for_copy_to_licence_fields.accept(text_area)
+        do_update_dynamic_attributes(application)
 
     @staticmethod
     def update_dynamic_attributes(application):
         """
         Updates application attributes based on admin schema definition.
         """
-        do_update_dynamic_attributes(application)
+        try:
+            do_update_dynamic_attributes(application)
+
+        except BaseException as e:
+            logger.error('ERR update_dynamic_attributes for {0} : {1}'.format(
+                application.id,
+                e,
+            ))
 
     def __str__(self):
         return 'ApplicationService'
@@ -164,6 +231,54 @@ class ApplicationService(object):
 """
 NOTE: This section for objects relate to Application Form rendering.
 """
+
+
+class BulkCreateManager(object):
+    '''
+    This helper class keeps track of ORM objects to be created for multiple
+    model classess, automatically creates those objects with `bulk_create`
+    when the number of objects accumulated for a given model class exceeds
+    `chunk_size`.
+
+    https://www.caktusgroup.com/blog/2019/01/09/django-bulk-inserts/
+    '''
+    def __init__(self, obj, chunk_size=100):
+        from collections import defaultdict
+
+        self._create_queues = defaultdict(list)
+        self.chunk_size = chunk_size
+        self.model_class = type(obj)
+        objs = self.model_class.objects.filter(
+            application_id=obj.application_id
+        ).all()
+        objs.delete()
+
+    def _commit(self, model_class):
+        model_key = model_class._meta.label
+        model_class.objects.bulk_create(self._create_queues[model_key])
+        self._create_queues[model_key] = []
+
+    def add(self, obj):
+        '''
+        Add an object to the queue to be created, and call bulk_create if we
+        have enough objects.
+        '''
+        model_class = type(obj)
+        model_key = model_class._meta.label
+        self._create_queues[model_key].append(obj)
+        if len(self._create_queues[model_key]) >= self.chunk_size:
+            self._commit(model_class)
+
+    def done(self):
+        '''
+        Always call this upon completion to make sure the final partial chunk
+        is saved.
+        '''
+        from django.apps import apps
+
+        for model_name, objs in self._create_queues.items():
+            if len(objs) > 0:
+                self._commit(apps.get_model(model_name))
 
 
 class ApplicationFormCompositor(object):
@@ -221,9 +336,10 @@ class CheckboxAndRadioButtonCompositor(ApplicationFormCompositor):
                 if schema_name not in schema_fields:
                     continue
                 schema_data = schema_fields[schema_name]
-                licence_purpose = LicencePurpose.objects.get(
-                    id=schema_data['licence_purpose_id']
-                )
+
+                if schema_data['type'] not in ['checkbox', 'radiobuttons']:
+                    continue
+
                 if 'options' in schema_data:
                     for option in schema_data['options']:
                         # Only modifications if the current option is selected
@@ -234,17 +350,21 @@ class CheckboxAndRadioButtonCompositor(ApplicationFormCompositor):
                             schema_name=schema_name,
                             adjusted_by_fields=adjusted_by_fields,
                             activity=selected_activity,
-                            purpose=licence_purpose
+                            purpose_id=schema_data['licence_purpose_id']
                         )
 
-                # If this is a checkbox - skip unchecked ones
                 elif data_record['value'] == 'on':
                     self._field.parse_component(
                         component=schema_data,
                         schema_name=schema_name,
                         adjusted_by_fields=adjusted_by_fields,
                         activity=selected_activity,
-                        purpose=licence_purpose
+                        purpose_id=schema_data['licence_purpose_id']
+                    )
+                elif data_record['value'] == '':
+                    # if unchecked reset field adjustments.
+                    self._field.reset_licence_purpose(
+                        selected_activity, schema_data['licence_purpose_id']
                     )
 
 
@@ -285,16 +405,62 @@ class TextAreaCompositor(ApplicationFormCompositor):
                 if schema_name not in schema_fields:
                     continue
                 schema_data = schema_fields[schema_name]
-                licence_purpose = LicencePurpose.objects.get(
-                    id=schema_data['licence_purpose_id']
-                )
+
                 if schema_data['type'] == 'text_area':
                     self._field.parse_component(
                         component=schema_data,
                         schema_name=schema_name,
                         adjusted_by_fields=adjusted_by_fields,
                         activity=selected_activity,
-                        purpose=licence_purpose
+                        purpose_id=schema_data['licence_purpose_id']
+                    )
+
+
+class TextCompositor(ApplicationFormCompositor):
+    """
+    A Class for objects which encapsulates an algorithm for formatting Text
+     on an Application Form.
+    """
+    def __init__(self, application, data_source):
+        self._application = application
+        self._data_source = data_source
+        self._children = set()
+
+    def do_algorithm(self, special_field_element):
+        self._field = special_field_element
+        self.render()
+
+    def render(self):
+        for selected_activity in self._application.activities:
+
+            self._field.reset(selected_activity)
+
+            schema_fields = self._application.get_schema_fields_for_purposes(
+                selected_activity.purposes.values_list('id', flat=True)
+            )
+
+            adjusted_by_fields = {}
+            for form_data_record in self._data_source:
+                try:
+                    # Retrieve dictionary of fields from a model instance
+                    data_record = form_data_record.__dict__
+                except AttributeError:
+                    # If a raw form data (POST) is supplied, form_data_record
+                    # is a key
+                    data_record = self._data_source[form_data_record]
+
+                schema_name = data_record['schema_name']
+                if schema_name not in schema_fields:
+                    continue
+                schema_data = schema_fields[schema_name]
+
+                if schema_data['type'] == 'text':
+                    self._field.parse_component(
+                        component=schema_data,
+                        schema_name=schema_name,
+                        adjusted_by_fields=adjusted_by_fields,
+                        activity=selected_activity,
+                        purpose_id=schema_data['licence_purpose_id']
                     )
 
 
@@ -334,6 +500,10 @@ class CheckboxAndRadioButtonVisitor(ApplicationFormVisitor):
         self._increase_application_fee_field = increase_fee_field
         self._compositor.do_algorithm(self._increase_application_fee_field)
 
+    def visit_species_options_field(self, species_options_field):
+        self._species_options_field = species_options_field
+        self._compositor.do_algorithm(self._species_options_field)
+
 
 class TextAreaVisitor(ApplicationFormVisitor):
     """
@@ -354,6 +524,25 @@ class TextAreaVisitor(ApplicationFormVisitor):
         self._compositor.do_algorithm(self._copy_to_licence_field)
 
 
+class TextVisitor(ApplicationFormVisitor):
+    """
+    An implementation of an operation declared by ApplicationFormVisitor to do
+    an algorithm specific to Text on a Form.
+
+    NOTE: Local state is stored and will accumulate during the traversal of the
+    Form.
+    """
+    def __init__(self, application, data_source):
+        self._application = application
+        self._data_source = data_source
+        # Apply a traversal strategy.
+        self._compositor = TextCompositor(application, data_source)
+
+    def visit_copy_to_licence_field(self, copy_to_licence_field):
+        self._copy_to_licence_field = copy_to_licence_field
+        self._compositor.do_algorithm(self._copy_to_licence_field)
+
+
 class SpecialFieldElement(object):
     """
     Special Field that defines an Accept operation that takes a
@@ -364,6 +553,118 @@ class SpecialFieldElement(object):
     @abc.abstractmethod
     def accept(self, visitor):
         pass
+
+    def reset(self, licence_activity):
+        """
+        Reset previous option settings on the licence activity by removing.
+        """
+        pass
+
+    def reset_licence_purpose(self, licence_activity, purpose_id):
+        """
+        Reset previous options settings on the licence purpose by removing.
+        """
+        pass
+
+
+class SpeciesOptionsFieldElement(SpecialFieldElement):
+    """
+    An implementation of an SpecialFieldElement operation that takes a
+    ApplicationFormVisitor as an argument.
+
+    example:
+
+        "options": [
+          {
+            "value": "yes",
+            "label": "Yes",
+          },
+          {
+            "value": "no",
+            "label": "No",
+            "species": [33974,33977]
+          }
+        ],
+        "type": "radiobuttons",
+        "name": "ATO-Import3",
+        "label": "Do you need to apply for a licence to import?",
+        "SpeciesOptions": true
+
+    """
+    _NAME = 'SpeciesOptions'
+    _SPECIES = 'species'
+
+    is_refreshing = False       # Flag indicating a page refresh.
+    records = None
+
+    def accept(self, application_form_visitor):
+        self._terms = {'terms': []}
+        self._application = application_form_visitor._application
+        self._data_source = application_form_visitor._data_source
+        if not self._data_source:
+            self.is_refreshing = True
+        application_form_visitor.visit_species_options_field(self)
+
+    def parse_component(
+            self,
+            component,
+            schema_name,
+            adjusted_by_fields,
+            activity,
+            purpose_id):
+
+        if self.is_refreshing:
+            # No user update with a page refesh.
+            return
+
+        if set([self._SPECIES]).issubset(component):
+            '''
+            Set the species options on the form.
+            '''
+            # update the species component value on the form to reference ids.
+            # else create one using name + '-SpeciesOptions'.
+            species_ids = ""
+            try:
+                species_ids = [str(s) for s in component[self._SPECIES]]
+
+            except BaseException:
+                pass
+
+            records = ApplicationFormDataRecord.objects.filter(
+                    application_id=self._application.id,
+                    licence_activity_id=activity.licence_activity_id,
+                    licence_purpose_id=purpose_id,
+                    component_type=self._SPECIES
+            ).update(
+                 value=species_ids
+            )
+
+            if not records:
+                ApplicationFormDataRecord.objects.create(
+                    field_name='{0}-SpeciesOptions'.format(schema_name),
+                    schema_name='{0}-SpeciesOptions'.format(schema_name),
+                    component_type=self._SPECIES,
+                    value=species_ids,
+                    application_id=self._application.id,
+                    licence_activity_id=activity.licence_activity_id,
+                    licence_purpose_id=purpose_id
+                )
+        else:
+            '''
+            SpeciesOptions is set with no species ids therefore clear all
+            species on the application form.
+            '''
+            records = ApplicationFormDataRecord.objects.filter(
+                    application_id=self._application.id,
+                    licence_activity_id=activity.licence_activity_id,
+                    licence_purpose_id=purpose_id,
+                    component_type=self._SPECIES
+            ).update(
+                 value=''
+            )
+
+    def __str__(self):
+        return 'Field Element: {0}'.format(self._NAME)
 
 
 class CopyToLicenceFieldElement(SpecialFieldElement):
@@ -401,7 +702,7 @@ class CopyToLicenceFieldElement(SpecialFieldElement):
             schema_name,
             adjusted_by_fields,
             activity,
-            purpose):
+            purpose_id):
 
         if self.is_refreshing:
             # No user update with a page refesh.
@@ -423,7 +724,7 @@ class CopyToLicenceFieldElement(SpecialFieldElement):
         return 'Field Element: {0}'.format(self._NAME)
 
 
-class PromptInpsectionFieldElement(SpecialFieldElement):
+class PromptInspectionFieldElement(SpecialFieldElement):
     """
     An implementation of an SpecialFieldElement operation that takes a
     ApplicationFormVisitor as an argument.
@@ -439,13 +740,15 @@ class PromptInpsectionFieldElement(SpecialFieldElement):
             self.is_refreshing = True
         application_form_visitor.visit_prompt_inspection_field(self)
 
-    def reset(self, licence_activity):
-
+    def reset_licence_purpose(self, licence_activity, purpose_id):
+        """
+        Reset previous options settings on the licence purpose by removing.
+        """
         if self.is_refreshing:
             # No user update with a page refesh.
             return
 
-        if isinstance(licence_activity, ApplicationSelectedActivity):
+        if licence_activity.is_inspection_required:
             licence_activity.is_inspection_required = False
             licence_activity.save()
 
@@ -455,15 +758,16 @@ class PromptInpsectionFieldElement(SpecialFieldElement):
             schema_name,
             adjusted_by_fields,
             activity,
-            purpose):
+            purpose_id):
 
         if self.is_refreshing:
             # No user update with a page refesh.
             return
 
+        activity.is_inspection_required = False
         if set([self._NAME]).issubset(component):
             activity.is_inspection_required = True
-            activity.save()
+        activity.save()
 
     def __str__(self):
         return 'Field Element: {0}'.format(self._NAME)
@@ -497,8 +801,13 @@ class StandardConditionFieldElement(SpecialFieldElement):
             return
 
         if isinstance(licence_activity, ApplicationSelectedActivity):
-            # Do not delete when previously added.
-            pass
+            # delete existing rendered standard conditions.
+            for condition in ApplicationCondition.objects.filter(
+                is_rendered=True,
+                standard=True,
+                application=self._application
+            ):
+                condition.delete()
 
     def parse_component(
             self,
@@ -506,7 +815,7 @@ class StandardConditionFieldElement(SpecialFieldElement):
             schema_name,
             adjusted_by_fields,
             activity,
-            purpose):
+            purpose_id):
 
         if self.is_refreshing:
             # No user update with a page refesh.
@@ -520,6 +829,9 @@ class StandardConditionFieldElement(SpecialFieldElement):
                 code=component[self._NAME],
                 obsolete=False).first()
             if condition:
+                purpose = LicencePurpose.objects.get(
+                       id=purpose_id
+                )
                 ac, created = ApplicationCondition.objects.get_or_create(
                     standard_condition=condition,
                     is_rendered=True,
@@ -542,11 +854,16 @@ class IncreaseApplicationFeeFieldElement(SpecialFieldElement):
     adjustments to the application fee for the Activity/Purpose.
     """
     NAME = 'IncreaseApplicationFee'
+    LICENCE = 'IncreaseLicenceFee'
 
     fee_policy = None           # Policy applied to the fee update.
     dynamic_attributes = None   # Attributes on the Activity Purpose.
     is_updating = False         # Flag indicating if update or retrieval.
     is_refreshing = False       # Flag indicating a page refresh.
+    has_fee_exemption = False   # Allow exemption for zero amount invoice.
+
+    adjusted_fee = 0
+    adjusted_licence_fee = 0
 
     def __init__(self):
         pass
@@ -573,10 +890,22 @@ class IncreaseApplicationFeeFieldElement(SpecialFieldElement):
         '''
         self.is_updating = is_update
 
+    def set_has_fee_exemption(self, is_exempt):
+        '''
+        Sets the flag indicating that this visit will force a zero amount to be
+        calculated for invoicing (zero amount invoice). The fee stored is only
+        for the adjusted amounts on the licence purpose.
+        '''
+        self.has_fee_exemption = is_exempt
+        self.fee_policy.set_has_fee_exemption(is_exempt)
+
     def reset(self, licence_activity):
         '''
         Reset the fees for the licence activity to it base fee amount.
         '''
+        self.adjusted_fee = 0
+        self.adjusted_licence_fee = 0
+
         if self.is_refreshing:
             # No user update with a page refesh.
             return
@@ -588,15 +917,24 @@ class IncreaseApplicationFeeFieldElement(SpecialFieldElement):
                 }
 
             if self.is_updating:
-                # reset purpose adjusted fee amount.
-                purposes = ApplicationSelectedActivityPurpose.objects.filter(
-                    selected_activity=licence_activity,
-                )
-                for p in purposes:
-                    p.adjusted_fee = 0
-                    p.save()
-
                 licence_activity.save()
+
+    def reset_licence_purpose(self, licence_activity, purpose_id):
+        """
+        Reset previous options settings on the licence purpose by removing.
+        """
+        if self.is_refreshing or not self.is_updating:
+            # No user update with a page refesh.
+            return
+
+        # reset purpose adjusted fee amount.
+        purposes = ApplicationSelectedActivityPurpose.objects.filter(
+            selected_activity=licence_activity,
+        )
+        for p in purposes:
+            p.adjusted_fee = self.adjusted_fee
+            p.adjusted_licence_fee = self.adjusted_licence_fee
+            p.save()
 
     def parse_component(
             self,
@@ -604,27 +942,37 @@ class IncreaseApplicationFeeFieldElement(SpecialFieldElement):
             schema_name,
             adjusted_by_fields,
             activity,
-            purpose):
+            purpose_id):
         '''
         Aggregate adjusted fees for the Activity/Purpose.
         '''
+        from decimal import Decimal as D
+        from decimal import ROUND_DOWN
+
         if self.is_refreshing:
             # No user update with a page refesh.
             return
 
-        self.adjusted_fee = 0
-        if set([self.NAME]).issubset(component):
+        if set([self.NAME]).issubset(component) \
+                or set([self.LICENCE]).issubset(component):
             def increase_fee(fees, field, amount):
+                if self.has_fee_exemption:
+                    return True
+                amount = D(amount).quantize(D('0.01'), rounding=ROUND_DOWN)
                 fees[field] += amount
                 fees[field] = fees[field] if fees[field] >= 0 else 0
                 return True
 
-            def adjusted_fee(amount):
-                self.adjusted_fee += amount
+            def adjusted_fee(field, amount):
+                amount = D(amount).quantize(D('0.01'), rounding=ROUND_DOWN)
+                if field == 'licence':
+                    self.adjusted_licence_fee += amount
+                elif field == 'application':
+                    self.adjusted_fee += amount
                 return True
 
             fee_modifier_keys = {
-                'NoIncreaseLicenceFee': 'licence',
+                self.LICENCE: 'licence',
                 self.NAME: 'application',
             }
             increase_limit_key = 'IncreaseTimesLimit'
@@ -648,6 +996,7 @@ class IncreaseApplicationFeeFieldElement(SpecialFieldElement):
                 field,
                 component[key]
             ) and adjusted_fee(
+                field,
                 component[key]
             ) for key, field in fee_modifier_keys.items())
 
@@ -655,13 +1004,24 @@ class IncreaseApplicationFeeFieldElement(SpecialFieldElement):
                 adjusted_by_fields[schema_name] += 1
 
             if adjustments_performed and self.is_updating:
-                # update adjusted fee for the activity purpose.
-                p = ApplicationSelectedActivityPurpose.objects.get_or_create(
-                    purpose=purpose,
-                    selected_activity=activity,
+                purpose = LicencePurpose.objects.get(
+                       id=purpose_id
                 )
-                p[0].adjusted_fee = self.adjusted_fee
-                p[0].save()
+                # update adjusted fee for the activity purpose.
+                p, c = ApplicationSelectedActivityPurpose.objects.\
+                    get_or_create(purpose=purpose, selected_activity=activity)
+
+                if c:  # Only save base fees for those not created.
+                    p.application_fee = purpose.base_application_fee
+                    p.licence_fee = purpose.base_licence_fee
+
+                # self.adjusted_fee = D(p.adjusted_fee) + self.adjusted_fee
+                # self.adjusted_licence_fee = \
+                #     D(p.adjusted_licence_fee) + self.adjusted_licence_fee
+
+                p.adjusted_fee = self.adjusted_fee
+                p.adjusted_licence_fee = self.adjusted_licence_fee
+                p.save()
 
     def get_adjusted_fees(self):
         '''
@@ -695,6 +1055,7 @@ class IncreaseApplicationFeeFieldElement(SpecialFieldElement):
             # don't calculate new fees for attributes.
             return self.dynamic_attributes
         # apply fee policy to re-calculate total fees for application.
+        self.fee_policy.set_has_fee_exemption(self.has_fee_exemption)
         self.fee_policy.set_dynamic_attributes(self.dynamic_attributes)
 
         return self.dynamic_attributes
@@ -707,6 +1068,7 @@ def do_process_form(
         action=ApplicationFormDataRecord.ACTION_TYPE_ASSIGN_VALUE):
     from wildlifecompliance.components.applications.utils import \
             MissingFieldsException
+
     can_edit_officer_comments = request.user.has_perm(
         'wildlifecompliance.licensing_officer'
     )
@@ -730,6 +1092,9 @@ def do_process_form(
     required_fields = application.required_fields
     missing_fields = []
 
+    bulk_mgr = BulkCreateManager(
+        ApplicationFormDataRecord(application_id=application.id)
+    )
     for field_name, field_data in form_data.items():
         schema_name = field_data.get('schema_name', '')
         instance_name = field_data.get('instance_name', '')
@@ -756,28 +1121,24 @@ def do_process_form(
         except KeyError:
             continue
 
-        form_data_record = ApplicationFormDataRecord.objects.filter(
+        SPECIES = ApplicationFormDataRecord.COMPONENT_TYPE_SELECT_SPECIES
+        form_data_record = ApplicationFormDataRecord(
             application_id=application.id,
             field_name=field_name,
             licence_activity_id=activity_id,
             licence_purpose_id=purpose_id,
-        ).first()
+            schema_name=schema_name,
+            instance_name=instance_name,
+            component_type=component_type,
+            component_attribute=component_attribute,
+            officer_comment=officer_comment,
+            assessor_comment=assessor_comment,
+            deficiency=deficiency
+        )
 
-        SPECIES = ApplicationFormDataRecord.COMPONENT_TYPE_SELECT_SPECIES
-        if not form_data_record:
-            form_data_record = ApplicationFormDataRecord.objects.create(
-                application_id=application.id,
-                field_name=field_name,
-                schema_name=schema_name,
-                instance_name=instance_name,
-                component_type=component_type,
-                licence_activity_id=activity_id,
-                licence_purpose_id=purpose_id,
-                component_attribute=component_attribute,
-            )
         # Species list may not exist in last save because the component has
         # been copied from an amendment. Save new list for species component.
-        elif form_data_record.component_type == SPECIES\
+        if component_type == SPECIES\
                 and not form_data_record.component_attribute:
             form_data_record.component_attribute = component_attribute
 
@@ -789,18 +1150,21 @@ def do_process_form(
                 missing_fields.append(missing_item)
                 continue
             form_data_record.value = value
-        elif action == \
-                ApplicationFormDataRecord.ACTION_TYPE_ASSIGN_COMMENT:
-            if can_edit_officer_comments:
-                form_data_record.officer_comment = officer_comment
-            if can_edit_assessor_comments:
-                form_data_record.assessor_comment = assessor_comment
-            if can_edit_deficiencies:
-                form_data_record.deficiency = deficiency
-        form_data_record.save()
 
+        # elif action == \
+        #         ApplicationFormDataRecord.ACTION_TYPE_ASSIGN_COMMENT:
+        #     if can_edit_officer_comments:
+        #         form_data_record.officer_comment = officer_comment
+        #     if can_edit_assessor_comments:
+        #         form_data_record.assessor_comment = assessor_comment
+        #     if can_edit_deficiencies:
+        #         form_data_record.deficiency = deficiency
+
+        bulk_mgr.add(form_data_record)
+
+    bulk_mgr.done()
     if action == ApplicationFormDataRecord.ACTION_TYPE_ASSIGN_VALUE:
-        do_update_dynamic_attributes(application)
+
         for existing_field in ApplicationFormDataRecord.objects.filter(
                 application_id=application.id):
             if existing_field.field_name not in form_data.keys():
@@ -814,10 +1178,12 @@ def do_process_form(
         )
 
 
-def do_update_dynamic_attributes(application):
-    """ Update application and activity attributes based on selected JSON
-        schema options.
-    """
+def do_update_dynamic_attributes(application, fee_exemption=False):
+    '''
+    Update application and activity attributes based on selected JSON schema
+    options. Any attributes which impact the fee for the application can be
+    exempted.
+    '''
     if application.processing_status not in [
             Application.PROCESSING_STATUS_DRAFT,
             Application.PROCESSING_STATUS_AWAITING_APPLICANT_RESPONSE,
@@ -830,6 +1196,7 @@ def do_update_dynamic_attributes(application):
     for_increase_fee_fields = IncreaseApplicationFeeFieldElement()
     for_increase_fee_fields.set_updating(True)
     for_increase_fee_fields.accept(checkbox)
+    for_increase_fee_fields.set_has_fee_exemption(fee_exemption)
     dynamic_attributes = for_increase_fee_fields.get_dynamic_attributes()
 
     # Save any parsed per-activity modifiers
@@ -839,28 +1206,6 @@ def do_update_dynamic_attributes(application):
         fees = field_data.pop('fees', {})
         selected_activity.licence_fee = fees['licence']
         selected_activity.application_fee = fees['application']
-
-        # Check when under review for changes in fee amount.
-        # Application fees can also be adjusted by internal officer.
-        # UNDER_REVIEW = Application.PROCESSING_STATUS_UNDER_REVIEW
-        # if application.processing_status == UNDER_REVIEW\
-        #     and fees['application']\
-        #         > selected_activity.base_fees['application']:
-        #     selected_activity.application_fee = fees['application'] \
-        #         - selected_activity.base_fees['application']
-
-        # Check for refunds to Application Amendment, Renewals and Requested
-        # Amendment Fees.
-        # REQUEST_AMEND = Application.CUSTOMER_STATUS_AMENDMENT_REQUIRED
-        # if application.application_type in [
-        #     Application.APPLICATION_TYPE_AMENDMENT,
-        #     Application.APPLICATION_TYPE_RENEWAL,
-        # ] or application.customer_status == REQUEST_AMEND:
-
-        #     # set fee to zero when refund exists.
-        #     if fees['application']\
-        #             < selected_activity.base_fees['application']:
-        #         selected_activity.application_fee = Decimal(0.0)
 
         # Adjust fees to include the Increase Fee updated form questions.
         for_increase_fee_fields.set_adjusted_fees_for(selected_activity)
@@ -893,6 +1238,23 @@ class TSCSpecieService():
 
     def get_strategy(self):
         return self._strategy
+
+    def search_filtered_taxon(self, filter_str, category):
+        """
+        Search filtered taxonomy of results for specie details.
+        """
+        try:
+            search_data = self._strategy.request_filtered_species(
+                filter_str, category
+            )
+
+            return search_data
+
+        except BaseException as e:
+            logger.error('{0} - {1}'.format(
+                TSCSpecieService.search_filtered_taxon(), e
+            ))
+            raise
 
     def search_taxon(self, specie_id):
         """
@@ -943,6 +1305,127 @@ class TSCSpecieCallStrategy(object):
         Operation for consuming TSCSpecie details.
         """
         pass
+
+    @abc.abstractmethod
+    def request_filtered_species(self, species, category):
+        """
+        Operation for consuming a filtered set of TSCSpecie details.
+        """
+        pass
+
+
+class HerbieSpecieKMICall(TSCSpecieCallStrategy):
+    '''
+    Public Herbie from KMI.
+    '''
+    _CODE = 'HERBIE'
+    _URL = 'https://kmi.dpaw.wa.gov.au/geoserver/ows?service=wfs&version=1.1.0'
+    FLORA = 'flora'
+    FAUNA = 'fauna'
+
+    def __init__(self):
+        super(TSCSpecieCallStrategy, self).__init__()
+        self._depth = sys.getrecursionlimit()
+
+    def set_depth(self, depth):
+        '''
+        Set the number of recursion levels.
+        '''
+        self._depth = depth if depth > 0 else sys.getrecursionlimit()
+
+    def request_filtered_species(self, search_data, category):
+        '''
+        Search herbie for species and return a list of matching species in the
+        form 'scientific name (common name)'.
+        The 'search' parameter is used to search (icontains like) through the
+        species_name (scientific name) and vernacular property (common name).
+        The 'type'=['fauna'|'flora'] parameter can be used to limit the
+        kingdom.
+
+        :return: a list of matching species in the form 'scientific name
+        (common name)'
+        '''
+        import sys
+        reload(sys)
+        sys.setdefaultencoding('utf8')
+        filtered_species = {}
+        results = []
+        params = {
+            'propertyName': '(species_name,vernacular)',
+            'sortBy': 'species_name'
+        }
+
+        def add_filter(cql_filter, params):
+            if 'cql_filter' not in params:
+                params['cql_filter'] = cql_filter
+            else:
+                params['cql_filter'] = params['cql_filter'] \
+                                                    + ' AND ' + cql_filter
+
+        def send_request(search):
+            A = '&request=GetFeature&typeNames=public:herbie_hbvspecies_public'
+            B = '&outputFormat=application/json'
+
+            kingdom = category.lower()
+            fauna_kingdom = 5
+            if kingdom == self.FAUNA:
+                add_filter('kingdom_id IN ({})'.format(fauna_kingdom), params)
+
+            elif kingdom == self.FLORA:
+                add_filter('kingdom_id NOT IN ({})'.format(
+                    fauna_kingdom
+                ), params)
+
+            if search_data:
+                f_ = "(species_name ILIKE '%{1}%'" \
+                    "OR vernacular ILIKE '%{1}%')".format(search, search)
+                add_filter(f_, params)
+
+            url = '{0}{1}{2}'.format(self._URL, A, B)
+            _request_results = requests.get(url, params=params, verify=False)
+            return _request_results
+
+        request_result = send_request(search_data)
+        if request_result:
+            features = request_result.json()['features']
+            for f in features:
+                specie = {}
+                name = f['properties']['species_name']
+                common_name = f[
+                    'properties'
+                ]['vernacular'] if 'vernacular' in f['properties'] else None
+
+                if common_name:
+                    name += ' ({0})'.format(common_name.encode("utf-8"))
+
+                specie['text'] = name
+                specie['id'] = name
+                results.append(specie)
+
+        filtered_species['results'] = results
+
+        return filtered_species
+
+    def request_species(self, specie_id):
+        '''
+        Search herbie for species and return a list of matching species in the
+        form 'scientific name (common name)'.
+        The 'search' parameter is used to search (icontains like) through the
+        species_name (scientific name) and vernacular property (common name).
+        The 'type'=['fauna'|'flora'] parameter can be used to limit the
+        kingdom.
+
+        :return: a list of matching species in the form 'scientific name
+        (common name)'
+        '''
+        def send_request(specie_id):
+            url = '{0}'.format(self._URL)
+            specie_json = requests.get(url, headers=self._AUTHORISE).json()
+            return specie_json
+
+        details = send_request(specie_id)
+
+        return details
 
 
 class TSCSpecieCall(TSCSpecieCallStrategy):

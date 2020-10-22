@@ -3,6 +3,7 @@ from future.utils import raise_with_traceback
 
 import json
 import re
+import logging
 
 from dateutil.parser import parse as date_parse
 
@@ -24,6 +25,7 @@ COLUMN_HEADER_FONT = Font(bold=True)
 
 YYYY_MM_DD_REGEX = re.compile(r'^\d{4}-\d{2}-\d{2}')
 
+logger = logging.getLogger(__name__)
 
 class FieldSchemaError(Exception):
     pass
@@ -420,11 +422,18 @@ class Schema:
         result = {}
         # field validation
         for field_name, value in row.items():
-            error = self.field_validation_error(field_name, value)
-            result[field_name] = {
-                'value': value,
-                'error': error
-            }
+            if field_name.endswith('deficiency-field'):
+                # apply no validation for deficiency comment fields.
+                result[field_name] = {
+                    'deficiency_value': value,
+                    'error': None
+                }
+            else:
+                error = self.field_validation_error(field_name, value)
+                result[field_name] = {
+                    'value': value,
+                    'error': error
+                }
         # Special case for lat/long easting/northing
         if self.is_lat_long_easting_northing_schema():
             result = self.post_validate_lat_long_easting_northing(result)
@@ -434,6 +443,33 @@ class Schema:
         rows_list = []
         for row in rows:
             yield self.validate_row(row)
+
+    def set_field_for(self, rows):
+        """
+        Apply fields which exist on the schema but not on the row. Fields will
+        be a default type.
+        """
+        try:
+            for field in self.field_names:
+                for row in rows:
+                    try:
+                        row[field]
+
+                    except KeyError as ke:
+                        logger.info('{0} Field: {1}'.format(
+                            'Schema.set_missing_fields()',
+                            ke
+                        ))
+                        row[field] = ''
+
+        except BaseException as be:
+            logger.error('{0} Field: {1} - {2}'.format(
+                'Schema.set_missing_fields()',
+                field,
+                be
+            ))
+
+        return True
 
     def get_error_fields(self, row):
         """
