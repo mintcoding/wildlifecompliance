@@ -80,6 +80,7 @@ from wildlifecompliance.components.applications.serializers import (
     DTExternalApplicationSelectedActivitySerializer,
     DTInternalApplicationSelectedActivitySerializer,
     IssueLicenceSerializer,
+    DTApplicationSelectSerializer,
 )
 
 from wildlifecompliance.components.main.process_document import (
@@ -93,6 +94,7 @@ from rest_framework_datatables.renderers import DatatablesRenderer
 from wildlifecompliance.management.permissions_manager import PermissionUser
 
 logger = logging.getLogger(__name__)
+# logger = logging
 
 
 def application_refund_callback(invoice_ref, bpoint_tid):
@@ -178,27 +180,12 @@ class ApplicationFilterBackend(DatatablesFilterBackend):
                 search_text = search_text.lower()
                 # join queries for the search_text search
                 # search_text_app_ids = []
-                search_text_app_ids = [
-                    application.id for application in queryset.all()
-                    if search_text in application.licence_purpose_names.lower()
-                ]
-                # for application in queryset:
-                #     if (search_text in application.licence_category.lower()
-                #         or search_text in application.licence_purpose_names.lower()
-                #         or search_text in application.applicant.lower()
-                #         or search_text in application.processing_status.lower()
-                #         or search_text in application.customer_status.lower()
-                #         or search_text in application.payment_status.lower()
-                #     ):
-                #         search_text_app_ids.append(application.id)
-                #     # if applicant is not an organisation, also search against the user's email address
-                #     if (application.applicant_type == Application.APPLICANT_TYPE_PROXY and
-                #         search_text in application.proxy_applicant.email.lower()):
-                #             search_text_app_ids.append(application.id)
-                #     if (application.applicant_type == Application.APPLICANT_TYPE_SUBMITTER and
-                #         search_text in application.submitter.email.lower()):
-                #             search_text_app_ids.append(application.id)
-
+                search_text_app_ids = Application.objects.values(
+                    'id'
+                ).filter(
+                    Q(proxy_applicant__first_name__icontains=search_text) |
+                    Q(proxy_applicant__last_name__icontains=search_text)
+                )
                 # use pipe to join both custom and built-in DRF datatables
                 # querysets (returned by super call above)
                 # (otherwise they will filter on top of each other)
@@ -209,10 +196,12 @@ class ApplicationFilterBackend(DatatablesFilterBackend):
             # apply user selected filters
             category_name = category_name.lower() if category_name else 'all'
             if category_name != 'all':
-                category_name_app_ids = []
-                for application in queryset:
-                    if category_name in application.licence_category_name.lower():
-                        category_name_app_ids.append(application.id)
+                # category_name_app_ids = []
+                category_name_app_ids = Application.objects.values(
+                    'id'
+                ).filter(
+                    selected_activities__licence_activity__licence_category__name__icontains=category_name
+                )
                 queryset = queryset.filter(id__in=category_name_app_ids)
             processing_status = processing_status.lower() if processing_status else 'all'
             if processing_status != 'all':
@@ -484,7 +473,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -544,6 +534,28 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 # End Save Documents
 
                 return Response(serializer.data)
+        except serializers.ValidationError:
+            print(traceback.print_exc())
+            raise
+        except ValidationError as e:
+            print(traceback.print_exc())
+            raise serializers.ValidationError(repr(e.error_dict))
+        except Exception as e:
+            print(traceback.print_exc())
+            raise serializers.ValidationError(str(e))
+
+    @detail_route(methods=['GET', ])
+    def get_application_selects(self, request, *args, **kwargs):
+        '''
+        Returns all drop-down lists for application dashboard.
+        '''
+        try:
+
+            instance = Application.objects.last()
+            serializer = DTApplicationSelectSerializer(instance)
+
+            return Response(serializer.data)
+
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -628,7 +640,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -712,10 +725,14 @@ class ApplicationViewSet(viewsets.ModelViewSet):
 
     @detail_route(methods=['GET', ])
     def internal_application(self, request, *args, **kwargs):
+        logger.debug('ApplicationViewSet.internal_application() - start')
         instance = self.get_object()
         serializer = InternalApplicationSerializer(
             instance, context={'request': request})
-        return Response(serializer.data)
+        response = Response(serializer.data)
+        logger.debug('ApplicationViewSet.internal_application() - end')
+
+        return response
 
     @detail_route(methods=['post'])
     @renderer_classes((JSONRenderer,))
@@ -739,7 +756,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             delete_session_application(request.session)
             print(traceback.print_exc())
@@ -779,7 +797,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -834,7 +853,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -862,7 +882,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             set_session_activity(request.session, activities[0])
 
             # Adjustments occuring only to the application fee.
-            if instance.has_adjusted_fees or instance.has_additional_fees:
+            # if instance.has_adjusted_fees or instance.has_additional_fees \
+            if instance.has_additional_fees \
+                or instance.has_payable_fees_at_finalisation:
 
                 # activities = instance.amended_activities
                 # only fees awaiting payment
@@ -872,7 +894,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 # only fees with adjustments or additional fee.
                 activities_adj = [
                    a for a in activities_pay
-                   if a.has_adjusted_application_fee
+                #    if a.has_adjusted_application_fee
+                if a.has_payable_fees_at_issue
                    or a.has_adjusted_licence_fee
                    or a.has_additional_fee
                 ]
@@ -992,7 +1015,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -1002,9 +1026,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         try:
             instance = self.get_object()
             instance.accept_id_check(request)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
-            return Response(serializer.data)
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
+            # return Response(serializer.data)
+            return Response(
+                {'id_check_status': instance.id_check_status},
+                status=status.HTTP_200_OK
+            )
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -1020,9 +1048,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         try:
             instance = self.get_object()
             instance.reset_id_check(request)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
-            return Response(serializer.data)
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
+            # return Response(serializer.data)
+            return Response(
+                {'id_check_status': instance.id_check_status},
+                status=status.HTTP_200_OK
+            )
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -1038,9 +1070,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         try:
             instance = self.get_object()
             instance.request_id_check(request)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
-            return Response(serializer.data)
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
+            # return Response(serializer.data)
+            return Response(
+                {'id_check_status': instance.id_check_status},
+                status=status.HTTP_200_OK
+            )
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -1080,9 +1116,33 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         try:
             instance = self.get_object()
             instance.accept_character_check(request)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
-            return Response(serializer.data)
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
+            # return Response(serializer.data)
+            return Response(
+                {'character_check_status': instance.character_check_status},
+                status=status.HTTP_200_OK
+            )
+        except serializers.ValidationError:
+            print(traceback.print_exc())
+            raise
+        except ValidationError as e:
+            print(traceback.print_exc())
+            raise serializers.ValidationError(repr(e.error_dict))
+        except Exception as e:
+            print(traceback.print_exc())
+            raise serializers.ValidationError(str(e))
+
+    @detail_route(methods=['POST', ])
+    def reset_character_check(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            instance.reset_character_check(request)
+
+            return Response(
+                {'character_check_status': instance.character_check_status},
+                status=status.HTTP_200_OK
+            )
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -1098,9 +1158,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         try:
             instance = self.get_object()
             instance.accept_return_check(request)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
-            return Response(serializer.data)
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
+            # return Response(serializer.data)
+            return Response(
+                {'return_check_status': instance.return_check_status},
+                status=status.HTTP_200_OK
+            )
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -1116,9 +1180,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         try:
             instance = self.get_object()
             instance.reset_return_check(request)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
-            return Response(serializer.data)
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
+            # return Response(serializer.data)
+            return Response(
+                {'return_check_status': instance.return_check_status},
+                status=status.HTTP_200_OK
+            )
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -1166,9 +1234,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError(
                     'You are not in any relevant licence officer groups for this application.')
             instance.assign_officer(request, request.user)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
-            return Response(serializer.data)
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
+            # return Response(serializer.data)
+            return Response(
+                {'assigned_officer_id': user.id},
+                status=status.HTTP_200_OK
+            )
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -1199,9 +1271,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError(
                     'User is not in any relevant licence officer groups for this application')
             instance.assign_officer(request, user)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
-            return Response(serializer.data)
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
+            # return Response(serializer.data)
+            return Response(
+                {'assigned_officer_id': user.id},
+                status=status.HTTP_200_OK
+            )
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -1217,9 +1293,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         try:
             instance = self.get_object()
             instance.unassign_officer(request)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
-            return Response(serializer.data)
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
+            # return Response(serializer.data)
+            return Response(
+                {'assigned_officer_id': None},
+                status=status.HTTP_200_OK
+            )
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -1242,10 +1322,15 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     licence approver groups for this application.')
 
             instance.set_activity_approver(activity_id, me)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
 
-            return Response(serializer.data)
+            # return Response(serializer.data)
+
+            return Response(
+                {'assigned_approver_id': me.id},
+                status=status.HTTP_200_OK
+            )            
 
         except serializers.ValidationError:
             print(traceback.print_exc())
@@ -1286,10 +1371,15 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     licence approver groups for application activity.')
 
             instance.set_activity_approver(activity_id, approver)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
 
-            return Response(serializer.data)
+            # return Response(serializer.data)
+
+            return Response(
+                {'assigned_approver_id': approver.id},
+                status=status.HTTP_200_OK
+            )
 
         except serializers.ValidationError:
             print(traceback.print_exc())
@@ -1309,10 +1399,15 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             instance = self.get_object()
             activity_id = request.data.get('activity_id', None)
             instance.set_activity_approver(activity_id, None)
-            serializer = InternalApplicationSerializer(
-                instance, context={'request': request})
+            # serializer = InternalApplicationSerializer(
+            #     instance, context={'request': request})
 
-            return Response(serializer.data)
+            # return Response(serializer.data)
+
+            return Response(
+                {'assigned_approver_id': None},
+                status=status.HTTP_200_OK
+            )            
 
         except serializers.ValidationError:
             print(traceback.print_exc())
@@ -1347,7 +1442,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -1377,7 +1473,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -1397,7 +1494,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -1422,7 +1520,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -1441,7 +1540,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -1449,11 +1549,14 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     @detail_route(methods=['post'])
     @renderer_classes((JSONRenderer,))
     def assessment_data(self, request, *args, **kwargs):
+        logger.debug('assessment_data()')
         try:
             instance = self.get_object()
+            assess = request.data.pop('__assess', False)
             with transaction.atomic():
+                is_initial_assess = instance.get_property_cache_assess()
+                if assess or is_initial_assess:
 
-                if instance.is_resubmitted:
                     checkbox = CheckboxAndRadioButtonVisitor(
                         instance, request.data
                     )
@@ -1465,10 +1568,13 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     for_inspection_fields = PromptInspectionFieldElement()
                     for_inspection_fields.accept(checkbox)
 
-                    instance.is_resubmitted = False
-                    instance.save()
+                    if is_initial_assess:
+                        instance.set_property_cache_assess(False)
+                        instance.save()
 
+            logger.debug('assessment_data() - response success')
             return Response({'success': True})
+
         except MissingFieldsException as e:
             return Response({
                 'missing': e.error_list},
@@ -1527,7 +1633,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -1549,7 +1656,8 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -1598,6 +1706,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     @detail_route(methods=['post'])
     @renderer_classes((JSONRenderer,))
     def form_data(self, request, *args, **kwargs):
+        logger.debug('form_data()')
         try:
             instance = self.get_object()
             with transaction.atomic():
@@ -1608,13 +1717,14 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                     action=ApplicationFormDataRecord.ACTION_TYPE_ASSIGN_VALUE
                 )
 
-                # Log save action for internal officer.
-                if request.user.is_staff:
-                    instance.log_user_action(
-                        ApplicationUserAction.ACTION_SAVE_APPLICATION.format(
-                            instance.id), request)
+                instance.log_user_action(
+                    ApplicationUserAction.ACTION_SAVE_APPLICATION.format(
+                        instance.lodgement_number
+                    ), request)
 
+            logger.debug('form_data() - successful response')
             return Response({'success': True})
+
         except MissingFieldsException as e:
             return Response({
                 'missing': e.error_list},
@@ -1945,6 +2055,56 @@ class ApplicationConditionViewSet(viewsets.ModelViewSet):
                 Q(application_id__in=user_applications))
         return ApplicationCondition.objects.none()
 
+    @detail_route(methods=['DELETE', ])
+    def delete(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            instance.application.log_user_action(
+                ApplicationUserAction.ACTION_DELETE_CONDITION.format(
+                    instance.licence_purpose.short_name,
+                    instance.condition[:256],
+                ),
+                request
+            )
+            instance.delete()
+            serializer = self.get_serializer(instance)
+            return Response(serializer.data)
+        except serializers.ValidationError:
+            print(traceback.print_exc())
+            raise
+        except ValidationError as e:
+            print(traceback.print_exc())
+            raise serializers.ValidationError(repr(e.error_dict))
+        except Exception as e:
+            print(traceback.print_exc())
+            raise serializers.ValidationError(str(e))
+
+    @detail_route(methods=['POST', ])
+    def update_condition(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data)
+            serializer.is_valid(raise_exception=True)
+            with transaction.atomic():
+                instance = serializer.save()
+                instance.application.log_user_action(
+                    ApplicationUserAction.ACTION_UPDATE_CONDITION.format(
+                        instance.licence_purpose.short_name,
+                        instance.condition[:256],
+                    ),
+                    request
+                )
+            return Response(serializer.data)
+        except serializers.ValidationError:
+            print(traceback.print_exc())
+            raise
+        except ValidationError as e:
+            print(traceback.print_exc())
+            raise serializers.ValidationError(repr(e.error_dict))
+        except Exception as e:
+            print(traceback.print_exc())
+            raise serializers.ValidationError(str(e))
+
     def create(self, request, *args, **kwargs):
         try:
             serializer = self.get_serializer(data=request.data)
@@ -1954,8 +2114,12 @@ class ApplicationConditionViewSet(viewsets.ModelViewSet):
                 instance.set_source(request.user)
                 instance.submit()
                 instance.application.log_user_action(
-                    ApplicationUserAction.ACTION_ENTER_CONDITIONS.format(
-                        instance.condition[:256]), request)
+                    ApplicationUserAction.ACTION_CREATE_CONDITION.format(
+                        instance.licence_purpose.short_name,
+                        instance.condition[:256],
+                    ),
+                    request
+                )
             return Response(serializer.data)
         except serializers.ValidationError:
             print(traceback.print_exc())
@@ -2037,7 +2201,8 @@ class ApplicationSelectedActivityViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -2159,8 +2324,9 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                print e
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                logger.error('AssessmentViewSet.create(): {0}'.format(e))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -2231,8 +2397,11 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                print e
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                logger.error(
+                    'AssessmentViewSet.update_assessment(): {0}'.format(e)
+                )
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -2331,8 +2500,11 @@ class AmendmentRequestViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                print e
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                logger.error(
+                    'AmendmentRequestViewSet.create(): {0}'.format(e)
+                )
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))

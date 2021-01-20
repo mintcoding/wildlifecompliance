@@ -38,6 +38,7 @@ from wildlifecompliance.components.returns.utils import (
 )
 
 logger = logging.getLogger(__name__)
+# logger = logging
 
 
 class ReturnService(object):
@@ -269,6 +270,7 @@ class ReturnService(object):
         Return data presented in table format with column headers.
         :return: formatted data.
         """
+        logger.debug('ReturnService.get_details_for() - start')
         details = []
         try:
             if a_return.has_sheet:
@@ -288,6 +290,7 @@ class ReturnService(object):
             logger.error('get_details_for() ID {0} - {1}'.format(
                 a_return.id, e
             ))
+        logger.debug('ReturnService.get_details_for() - end')
 
         return details
 
@@ -339,11 +342,26 @@ class ReturnService(object):
         '''
         Get list of species available for the return.
         '''
+        logger.debug('ReturnService.get_sheet_species_list_for() - start')
         if a_return.has_sheet:
             sheet = ReturnSheet(a_return)
             return sheet.species_list
 
         return None
+
+    @staticmethod
+    def get_sheet_species_saved_for(a_return):
+        '''
+        Get list of species saved for the return.
+        '''
+        logger.debug('ReturnService.get_sheet_species_saved_for() - start')
+        saved_list = None
+        if a_return.has_sheet:
+            sheet = ReturnSheet(a_return)
+            saved_list = sheet.get_species_saved()
+        logger.debug('ReturnService.get_sheet_species_saved_for() - end')
+
+        return saved_list
 
     @staticmethod
     def get_sheet_species_for(a_return):
@@ -359,6 +377,7 @@ class ReturnService(object):
         '''
         Get list of species available for the return.
         '''
+        logger.debug('ReturnService.get_species_list_for() - start')
         if a_return.has_sheet:
             sheet = ReturnSheet(a_return)
             return sheet.species_list
@@ -542,6 +561,9 @@ class ReturnData(object):
         :param request:
         :return:
         """
+        if not request.data.get('table_name'):
+            return
+
         returns_tables = request.data.get('table_name')
         table_deficiency = returns_tables + '-deficiency-field'
 
@@ -557,12 +579,14 @@ class ReturnData(object):
             elif key == "nilNo":
                 # Not submitting a Nil return so save data.
                 is_valid_data = self._is_post_data_valid(
-                    returns_tables.encode('utf-8'),
+                    # returns_tables.encode('utf-8'),
+                    returns_tables,
                     data
                 )
                 if is_valid_data:
 
-                    table_info = returns_tables.encode('utf-8')
+                    # table_info = returns_tables.encode('utf-8')
+                    table_info = returns_tables
                     if self._return.return_type.with_no_species:
                         table_rows = self._get_table_rows(table_info, data)
                         if table_rows:
@@ -592,7 +616,8 @@ class ReturnData(object):
                     raise FieldError('Enter data in correct format.')
 
             elif key == table_deficiency:
-                table_info = returns_tables.encode('utf-8')
+                # table_info = returns_tables.encode('utf-8')
+                table_info = returns_tables
                 table_rows = self._get_table_rows(
                     table_info, data)
                 if self.requires_species():
@@ -633,6 +658,28 @@ class ReturnData(object):
             #     key = "nilNo"
 
             _validate_and_save_key_data(key, data)
+
+    def get_species_list(self):
+        '''
+        List of Species available with Return Data.
+        :return: List of Species.
+        {
+         'S000001': 'Western Grey Kangaroo', 'S000002': 'Western Red Kangaroo',
+         'S000003': 'Blue Banded Bee', 'S000004': 'Orange-Browed Resin Bee'
+        }
+
+        '''
+        new_list = {}
+        for _species in ReturnTable.objects.filter(ret=self._return):
+            utils = ReturnSpeciesUtility(self._return)
+            name_str = utils.get_species_name_from_id(_species.name)
+            new_list[_species.name] = name_str
+
+            self._species = _species.name
+
+        self._species_list.append(new_list)
+
+        return new_list
 
     def get_table_deficiency(self, deficiency_key):
         '''
@@ -800,6 +847,20 @@ class ReturnData(object):
         :return:
         """
         return self._species
+
+    def get_species_saved(self):
+        '''
+        Getter for saved species on the Return for this Return Data.
+        {
+         'S000001': 'Western Grey Kangaroo', 'S000002': 'Western Red Kangaroo',
+         'S000003': 'Blue Banded Bee', 'S000004': 'Orange-Browed Resin Bee'
+        }
+        :return: list of species saved on the return.
+        '''
+        logger.debug('ReturnData.get_species_saved() - start')
+        new_list = {}
+
+        return new_list
 
     def __str__(self):
         return self._return.lodgement_number
@@ -1218,16 +1279,27 @@ class ReturnSheet(object):
                "pay": "false", "initial": ""}
     }
 
+    _return = None                  # Composite Return.
+    _species_list = None            # List of Species available.
+    _table = {'data': None}         # Table of Return details.
+    _species = None                 # Selected saved Specie.
+    _species_saved = []             # List of Species saved.
+
     def __init__(self, a_return):
+        logger.debug('ReturnSheet.__init__() - start')
         self._return = a_return
         self._return.return_type.data_descriptor = self._SHEET_SCHEMA
         self._species_list = []
         self._table = {'data': None}
         # build list of currently added Species.
         self._species = None
-        for _species in ReturnTable.objects.filter(ret=a_return):
-            self._species_list.append(_species.name)
-            self._species = _species.name
+        self._species_list = ReturnTable.objects.filter(ret=a_return)
+        # self._species_list.append(_species.name)
+        # if (_species.has_rows()):
+        #     self._species_saved.append(_species.name)
+        #     self._species = _species.name
+        self.get_species_list()
+        logger.debug('ReturnSheet.__init__() - end')
 
     @staticmethod
     def set_licence_species(the_return):
@@ -1271,55 +1343,14 @@ class ReturnSheet(object):
 
     @property
     def species_list(self):
-        """
-        List of Species available with Return Data.
-        :return: List of Species.
-        {
-         'S000001': 'Western Grey Kangaroo', 'S000002': 'Western Red Kangaroo',
-         'S000003': 'Blue Banded Bee', 'S000004': 'Orange-Browed Resin Bee'
-        }
-
-        """
-        new_list = {}
-        for _species in ReturnTable.objects.filter(ret=self._return):
-            utils = ReturnSpeciesUtility(self._return)
-            name_str = utils.get_species_name_from_id(_species.name)
-            new_list[_species.name] = name_str
-
-            self._species = _species.name
-
-        self._species_list.append(new_list)
-
-        return new_list
-
-    def _species_list(self):
-        """
-        List of Species available with Running Sheet of Activities.
-        :return: List of Species.
-        {
-         'S000001': 'Western Grey Kangaroo', 'S000002': 'Western Red Kangaroo',
-         'S000003': 'Blue Banded Bee', 'S000004': 'Orange-Browed Resin Bee'
-        }
-
-        """
-        from wildlifecompliance.components.licences.models import (
-            LicenceSpecies
-        )
-        new_list = {}
-        for _species in ReturnTable.objects.filter(ret=self._return):
-
-            lic_specie = LicenceSpecies.objects.filter(
-                specie_id=int(_species.name)
-            )
-            lic_specie_data = lic_specie[0].data
-            lic_specie_name = lic_specie_data[0]['vernacular_names']
-            _species_detail = ReturnRow.objects.filter(return_table=_species)
-            if _species_detail.exists():
-                value = lic_specie_name
-                new_list[_species.name] = value
-                self._species = _species.name
-        self._species_list.append(new_list)
-        return new_list
+        '''
+        Property list of species available on this return sheet.
+        '''
+        # return self.get_species_list()
+        logger.debug('ReturnSheet.species_list() - count {}'.format(
+            len(self._species_list)
+        ))
+        return self.get_species_list()
 
     @property
     def activity_list(self):
@@ -1341,7 +1372,6 @@ class ReturnSheet(object):
         return self.ACTIVITY_OPTIONS
 
     # todo: more generic method name for payment transfer
-    @property
     def process_transfer_fee_payment(self, request):
         '''
         Process transfer fees.
@@ -1408,14 +1438,21 @@ class ReturnSheet(object):
         :return:
         """
         for species in self.species_list:
+            _data = request.data.get(species)
+
+            if not _data:
+                continue
+
             try:
-                _data = request.data.get(species).encode('utf-8')
+                # _data = request.data.get(species).encode('utf-8')
                 _data = ast.literal_eval(_data)  # ast should convert to tuple.
                 table_rows = self._get_table_rows(_data)
                 self._return.save_return_table(species, table_rows, request)
 
             except AttributeError as e:
-                print(e)
+                logger.info('ReturnSheet.store() ID: {0} {1} - {2}'.format(
+                    self._return.id, species, e
+                ))
                 continue
 
         self._add_transfer_activity(request)
@@ -1436,6 +1473,89 @@ class ReturnSheet(object):
         """
         return self._species
 
+    def get_species_saved(self):
+        '''
+        Getter for saved species on the Return for this sheet.
+        {
+         'S000001': 'Western Grey Kangaroo', 'S000002': 'Western Red Kangaroo',
+         'S000003': 'Blue Banded Bee', 'S000004': 'Orange-Browed Resin Bee'
+        }
+        :return: list of species saved on the return.
+        '''
+        logger.debug('ReturnSheet.get_species_saved() - start')
+        new_list = {}
+        util = ReturnSpeciesUtility(self._return)
+        ordered = self._species_list.order_by('name')
+        for _species in ordered:
+            if (_species.has_rows()):
+                name_str = util.get_species_name_from_id(_species.name)
+                new_list[_species.name] = name_str
+
+        self._species_saved.append(new_list)
+        logger.debug('ReturnSheet.get_species_saved() - end')
+
+        return new_list
+
+    def get_species_list(self):
+        '''
+        Getter for species available on the Return for this sheet.
+        {
+         'S000001': 'Western Grey Kangaroo', 'S000002': 'Western Red Kangaroo',
+         'S000003': 'Blue Banded Bee', 'S000004': 'Orange-Browed Resin Bee'
+        }
+        :return: list of species available on the return.
+        '''
+        logger.debug('ReturnSheet.get_species_list() - start')
+        available_list = {}
+
+        util = ReturnSpeciesUtility(self._return)
+        for _species in self._species_list:
+            self._species = _species.name
+            if (_species.has_rows()):
+                self._species = _species.name
+                break
+        name_str = util.get_species_name_from_id(self._species)
+        available_list[self._species] = name_str
+
+        for _species in self._species_list:
+            name_str = util.get_species_name_from_id(_species.name)
+            available_list[_species.name] = name_str
+            # if _species.name != self._species:
+            #     name_str = util.get_species_name_from_id(_species.name)
+            #     available_list[_species.name] = name_str
+
+        logger.debug('ReturnSheet.get_species_list() - end')
+        return available_list
+
+    def get_species_list_from_tsc(self):
+        '''
+        Getter for species available on the Return for this sheet. The species
+        are taken from TSC server (redundant).
+        {
+         'S000001': 'Western Grey Kangaroo', 'S000002': 'Western Red Kangaroo',
+         'S000003': 'Blue Banded Bee', 'S000004': 'Orange-Browed Resin Bee'
+        }
+        :return: List of Species.
+        '''
+        from wildlifecompliance.components.licences.models import (
+            LicenceSpecies
+        )
+        new_list = {}
+        for _species in ReturnTable.objects.filter(ret=self._return):
+
+            lic_specie = LicenceSpecies.objects.filter(
+                specie_id=int(_species.name)
+            )
+            lic_specie_data = lic_specie[0].data
+            lic_specie_name = lic_specie_data[0]['vernacular_names']
+            _species_detail = ReturnRow.objects.filter(return_table=_species)
+            if _species_detail.exists():
+                value = lic_specie_name
+                new_list[_species.name] = value
+                self._species = _species.name
+        self._species_list.append(new_list)
+        return new_list
+
     def is_valid_transfer(self, req):
         """
         Validate transfer request details.
@@ -1447,7 +1567,8 @@ class ReturnSheet(object):
         if not req.data.get('transfer'):
             return False
 
-        _data = req.data.get('transfer').encode('utf-8')
+        # _data = req.data.get('transfer').encode('utf-8')
+        _data = req.data.get('transfer')
         _transfers = ast.literal_eval(_data)
         _lic = _transfers['licence']
 
@@ -1584,7 +1705,8 @@ class ReturnSheet(object):
         """
         if not request.data.get('transfer'):
             return False
-        _data = request.data.get('transfer').encode('utf-8')
+        # _data = request.data.get('transfer').encode('utf-8')
+        _data = request.data.get('transfer')
         _transfers = ast.literal_eval(_data)
         if isinstance(_transfers, tuple):
             for transfer in _transfers:
@@ -1612,7 +1734,8 @@ class ReturnSheet(object):
         # TODO: This validation is not completed.
         if not request.data.get('transfer'):
             return False
-        data = request.data.get('transfer').encode('utf-8')
+        # data = request.data.get('transfer').encode('utf-8')
+        data = request.data.get('transfer')
         ast.literal_eval(data)
         # quantity = transfers['qty']
         # species_id = transfers['transfer']

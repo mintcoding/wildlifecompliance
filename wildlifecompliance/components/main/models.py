@@ -8,6 +8,31 @@ import os
 from django.utils.translation import ugettext_lazy as _
 
 logger = logging.getLogger(__name__)
+# logger = logging
+
+@python_2_unicode_compatible
+class SystemMaintenance(models.Model):
+    name = models.CharField(max_length=100)
+    description = models.TextField()
+    start_date = models.DateTimeField()
+    end_date = models.DateTimeField()
+
+    def duration(self):
+        """ Duration of system maintenance (in mins) """
+        return int(
+            (self.end_date - self.start_date).total_seconds()/60.
+        ) if self.end_date and self.start_date else ''
+
+    duration.short_description = 'Duration (mins)'
+
+    class Meta:
+        app_label = 'wildlifecompliance'
+        verbose_name_plural = "System maintenance"
+
+    def __str__(self):
+        return 'System Maintenance: {} ({}) - starting {}, ending {}'.format(
+            self.name, self.description, self.start_date, self.end_date
+        )
 
 
 @python_2_unicode_compatible
@@ -51,6 +76,7 @@ class UserAction(models.Model):
     what = models.TextField(blank=False)
 
     def __str__(self):
+        logger.debug('UserAction.__str__()')
         return "{what} ({who} at {when})".format(
             what=self.what,
             who=self.who,

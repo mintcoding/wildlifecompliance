@@ -12,8 +12,7 @@ from wildlifecompliance.components.applications.models import (
 )
 
 logger = logging.getLogger(__name__)
-logging.disable(logging.NOTSET)
-logger.setLevel(logging.DEBUG)
+# logger = logging
 
 
 class InvoiceClearable(object):
@@ -297,23 +296,26 @@ class ApplicationFeePolicy(object):
 
     @staticmethod
     def get_fee_policy_for(application):
-
+        logger.debug('ApplicationFeePolicy.get_fee_policy_for()')
         AMEND = Application.APPLICATION_TYPE_AMENDMENT
         RENEW = Application.APPLICATION_TYPE_RENEWAL
         NEW = Application.APPLICATION_TYPE_NEW_LICENCE
         # New Activity is set for multiple activities on application.
         NEW_ACTIVITY = Application.APPLICATION_TYPE_ACTIVITY
 
-        get_policy = {
-            AMEND: ApplicationFeePolicyForAmendment(application),
-            RENEW: ApplicationFeePolicyForRenew(application),
-            NEW: ApplicationFeePolicyForNew(application),
-            NEW_ACTIVITY: ApplicationFeePolicyForNew(application),
-        }
-        policy = get_policy.get(
-            application.application_type,
-            ApplicationFeePolicyForNew(application)
-        )
+        policy = None
+
+        if application.application_type == AMEND:
+            policy = ApplicationFeePolicyForAmendment(application)
+
+        elif application.application_type == RENEW:
+            policy = ApplicationFeePolicyForRenew(application)
+
+        elif application.application_type == NEW_ACTIVITY:
+            policy = ApplicationFeePolicyForNew(application)
+
+        else:
+            policy = ApplicationFeePolicyForNew(application)
 
         return policy
 
@@ -489,6 +491,9 @@ class ApplicationFeePolicy(object):
         Set the fee attributes on this policy to licence activity purposes
         saved against the application.
         '''
+        logger.debug(
+            'ApplicationFeePolicy.set_dyn_attr_from_purpose_fees() - start'
+        )
         has_purpose = False     # No purposes will exist with pre-submission.
         fees_app_tot = 0
         fees_lic_tot = 0
@@ -532,6 +537,10 @@ class ApplicationFeePolicy(object):
         if self.has_fee_exemption:
             self.dynamic_attributes['fees']['application'] = 0
             self.dynamic_attributes['fees']['licence'] = 0
+
+        logger.debug(
+            'ApplicationFeePolicy.set_dyn_attr_from_purpose_fees() - end'
+        )
 
     @transaction.atomic
     def set_application_fee_on_purpose_for(self, activity):
@@ -1259,11 +1268,14 @@ class ApplicationFeePolicyForNew(ApplicationFeePolicy):
         )
 
     def init_dynamic_attributes(self):
+        logger.debug('ApplicationFeePolicyForNew.init_dynamic_attributes()')
+
         self.is_refreshing = False
         fees = Application.calculate_base_fees(
             self.application.licence_purposes.values_list('id', flat=True))
 
-        if self.application.application_fee_paid:
+        pay_status = self.application.get_property_cache_payment_status()
+        if pay_status and pay_status == ApplicationInvoice.PAYMENT_STATUS_PAID:
             fees = {'application': 0, 'licence': 0}
 
         self.dynamic_attributes = {
@@ -1276,6 +1288,7 @@ class ApplicationFeePolicyForNew(ApplicationFeePolicy):
         Set Application fee from the saved fees. Required when presentation is
         refreshed and no attributes are passed.
         '''
+        logger.debug('ApplicationFeePolicyForNew.set_application_fee()')
         self.is_refreshing = True
         self.set_dynamic_attributes_from_purpose_fees()
 
@@ -1375,17 +1388,20 @@ class ApplicationFeePolicyForNew(ApplicationFeePolicy):
                 paid_lic_tot = 0
                 paid_app_tot = 0
                 for p in activity.proposed_purposes.all():
-                    fees_lic += p.licence_fee if p.is_payable \
-                        else 0
-                    fees_app += p.application_fee if p.is_payable \
-                        else 0
+                    # fees_lic += p.licence_fee if p.is_payable \
+                    #     else 0
+                    # fees_app += p.application_fee if p.is_payable \
+                    #     else 0
                     paid_lic_tot += p.total_paid_adjusted_licence_fee \
                         if p.is_payable else 0
                     paid_app_tot += p.total_paid_adjusted_application_fee \
                         if p.is_payable else 0
 
-                fees_app_new = fees_app_adj - paid_app_tot
-                fees_lic_new = fees_lic_adj - paid_lic_tot
+                fees_app = fees_app_adj - paid_app_tot
+                fees_lic = fees_lic_adj - paid_lic_tot
+
+                fees_app_new += fees_app
+                fees_lic_new += fees_lic
 
             else:
                 fees_app_new += fees_app_adj

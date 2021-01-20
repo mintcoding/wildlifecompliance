@@ -267,7 +267,7 @@ class LicenceFeeSuccessView(TemplateView):
                             amount=fee
                         ))
 
-                    fee = p.adjusted_fee
+                    fee = p.get_payable_application_fee()
                     l_type = ActivityInvoiceLine.LINE_TYPE_APPLICATION
 
                     if fee > -1:
@@ -407,7 +407,8 @@ def pdflatex(request):
         return error_response
 
     with open(directory + texname, "w") as f:
-        f.write(output.encode('utf-8'))
+        # f.write(output.encode('utf-8'))
+        f.write(output)
         logger.debug("Writing to {}".format(directory + texname))
 
     #import ipdb; ipdb.set_trace()

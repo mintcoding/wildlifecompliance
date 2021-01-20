@@ -20,9 +20,9 @@
         <div class="col-sm-12">
             <div class="row">
                 <label style="width:70%;" class="col-sm-4">Do you want to Lodge a nil Return?</label>
-                <input type="radio" id="nilYes" name="nilYes" value="yes" v-model='nilReturn' :disabled='isReadOnly'>
+                <input type="radio" id="nilYes" name="nilYes" value="yes" v-model='returns.nil_return' :disabled='isReadOnly'>
                 <label style="width:10%;" for="nilYes">Yes</label>
-                <input type="radio" id="nilNo" name="nilNo" value="no" v-model='nilReturn' :disabled='isReadOnly'>
+                <input type="radio" id="nilNo" name="nilNo" value="no" v-model='returns.nil_return' :disabled='isReadOnly'>
                 <label style="width:10%;" for="nilNo">No</label>
             </div>
             <div v-if="nilReturn === 'yes'" class="row">
@@ -109,7 +109,8 @@ export default {
       return this.spreadsheet != null ? this.spreadsheet.name: '';
     },
     isReadOnly: function() {
-      return this.readonly || !this.is_external;
+      this.readonly = this.is_external && this.returns.is_draft ? false : true;
+      return this.readonly;
     },
     refreshGrid: function() {
       this.setReturnsEstimateFee()
@@ -177,6 +178,7 @@ export default {
       if (this.species_cache[specie_id] != null) {
         // species json previously loaded from ajax
         this.returns.table[0]['data'] = this.species_cache[specie_id]
+        this.setGridDate(specie_id)
 
       } else {
         // load species json from ajax
@@ -201,6 +203,17 @@ export default {
       this.returns.species = specie_id;
       this.refresh_grid = true
       return
+    },
+    setGridDate: function(_id){
+        let specie_id = _id
+        for (let r=0; r<this.species_cache[specie_id].length; r++){
+          let val = 'date' + '::' + r;
+          if ($(`[id='${val}']`)[0]){
+            $(`[id='${val}']`)[0].value = this.species_cache[specie_id][r]['date']['value']
+          } else {
+            break;
+          }
+        } 
     },
     initialiseSpeciesSelect: function(reinit=false){
       var vm = this;

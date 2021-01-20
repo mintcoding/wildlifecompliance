@@ -1,4 +1,5 @@
 import traceback
+import logging
 from datetime import datetime, timedelta
 from django.urls import reverse
 from django.db.models import Q
@@ -52,6 +53,9 @@ from wildlifecompliance.components.returns.services import (
     ReturnService,
     ReturnData,
 )
+
+logger = logging.getLogger(__name__)
+# logger = logging
 
 
 class ReturnFilterBackend(DatatablesFilterBackend):
@@ -203,11 +207,18 @@ class ReturnViewSet(viewsets.ReadOnlyModelViewSet):
     @detail_route(methods=['POST', ])
     def accept(self, request, *args, **kwargs):
         try:
+            logger.debug('ReturnViewSet.accept() - start')
             instance = self.get_object()
             # instance.accept(request)
             ReturnService.accept_return_request(request, instance)
-            serializer = self.get_serializer(instance)
-            return Response(serializer.data)
+            # serializer = self.get_serializer(instance)
+            logger.debug('ReturnViewSet.accept() - end')
+
+            return Response(
+                {'return_id': instance.id},
+                status=status.HTTP_200_OK
+            )
+
         except serializers.ValidationError:
             print(traceback.print_exc())
             raise
@@ -221,6 +232,7 @@ class ReturnViewSet(viewsets.ReadOnlyModelViewSet):
     @detail_route(methods=['POST', ])
     def upload_details(self, request, *args, **kwargs):
         try:
+            logger.debug('ReturnViewSet.upload_details() - start')
             instance = self.get_object()
             if not instance.has_data:
                 return Response(
@@ -237,6 +249,7 @@ class ReturnViewSet(viewsets.ReadOnlyModelViewSet):
                 )
             data = ReturnData(instance)
             table = data.build_table(spreadsheet.rows_list)
+            logger.debug('ReturnViewSet.upload_details() - end')
 
             return Response(table)
         except serializers.ValidationError:
@@ -259,13 +272,13 @@ class ReturnViewSet(viewsets.ReadOnlyModelViewSet):
 
     @list_route(methods=['GET', ])
     def sheet_details(self, request, *args, **kwargs):
+        logger.debug('ReturnViewSet.sheet_details() - start')
         return_id = self.request.query_params.get('return_id')
         species_id = self.request.query_params.get('species_id')
-        # instance = Return.objects.get(id=return_id).sheet
-        # instance.set_species(species_id)
         instance = Return.objects.get(id=return_id)
         sheet = ReturnService.set_species_for(instance, species_id)
-        # return Response(instance.table)
+        logger.debug('ReturnViewSet.sheet_details() - end')
+
         return Response(sheet.table)
 
     @detail_route(methods=['POST', ])
@@ -363,7 +376,8 @@ class ReturnViewSet(viewsets.ReadOnlyModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))
@@ -371,12 +385,14 @@ class ReturnViewSet(viewsets.ReadOnlyModelViewSet):
     @detail_route(methods=['POST', ])
     def save(self, request, *args, **kwargs):
         try:
+            logger.debug('ReturnViewSet.save() - start')
             instance = self.get_object()
 
             with transaction.atomic():
                 ReturnService.store_request_details_for(instance, request)
                 instance.save()
                 serializer = self.get_serializer(instance)
+            logger.debug('ReturnViewSet.save() - end')
 
             return Response(serializer.data)
         except serializers.ValidationError:
@@ -390,14 +406,52 @@ class ReturnViewSet(viewsets.ReadOnlyModelViewSet):
             raise serializers.ValidationError(str(e))
 
     @detail_route(methods=['POST', ])
+    def save_and_submit(self, request, *args, **kwargs):
+        try:
+            logger.debug('ReturnViewSet.save_and_submit() - start')
+            instance = self.get_object()
+
+            with transaction.atomic():
+
+                ReturnService.store_request_details_for(instance, request)
+                instance.set_submitted(request)
+                instance.submitter = request.user
+                instance.save()
+
+            logger.debug('ReturnViewSet.save_and_submit() - end')
+
+            return Response(
+                {'return_id': instance.id},
+                status=status.HTTP_200_OK
+            )
+
+        except serializers.ValidationError:
+            delete_session_return(request.session)
+            print(traceback.print_exc())
+            raise
+        except ValidationError as e:
+            if hasattr(e, 'error_dict'):
+                raise serializers.ValidationError(repr(e.error_dict))
+            else:
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
+        except Exception as e:
+            delete_session_return(request.session)
+            print(traceback.print_exc())
+            raise serializers.ValidationError(str(e))
+
+    @detail_route(methods=['POST', ])
     def submit(self, request, *args, **kwargs):
         try:
-            with transaction.atomic:
-                instance = self.get_object()
+            logger.debug('ReturnViewSet.submit() - start')
+            instance = self.get_object()
+
+            with transaction.atomic():
                 instance.set_submitted(request)
                 instance.submitter = request.user
                 instance.save()
                 serializer = self.get_serializer(instance)
+            logger.debug('ReturnViewSet.submit() - end')
 
             return Response(serializer.data)
 
@@ -409,7 +463,8 @@ class ReturnViewSet(viewsets.ReadOnlyModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             delete_session_return(request.session)
             print(traceback.print_exc())
@@ -654,7 +709,8 @@ class ReturnAmendmentRequestViewSet(viewsets.ModelViewSet):
         return ReturnRequest.objects.none()
 
     def create(self, request, *args, **kwargs):
-        DRAFT = Return.RETURN_PROCESSING_STATUS_DRAFT
+        # DRAFT = Return.RETURN_PROCESSING_STATUS_DRAFT
+        DUE = Return.RETURN_PROCESSING_STATUS_DUE
         try:
 
             with transaction.atomic():
@@ -664,7 +720,7 @@ class ReturnAmendmentRequestViewSet(viewsets.ModelViewSet):
                 text = amend_data.pop('text')
 
                 returns = Return.objects.get(id=a_return['id'])
-                returns.processing_status = DRAFT
+                returns.processing_status = DUE
                 returns.save()
                 application = a_return['application']
                 licence = a_return['licence']
@@ -697,8 +753,11 @@ class ReturnAmendmentRequestViewSet(viewsets.ModelViewSet):
             if hasattr(e, 'error_dict'):
                 raise serializers.ValidationError(repr(e.error_dict))
             else:
-                print e
-                raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                logger.error(
+                    'ReturnAmendmentRequestViewSet.create(): {0}'.format(e)
+                )
+                # raise serializers.ValidationError(repr(e[0].encode('utf-8')))
+                raise serializers.ValidationError(repr(e[0]))
         except Exception as e:
             print(traceback.print_exc())
             raise serializers.ValidationError(str(e))

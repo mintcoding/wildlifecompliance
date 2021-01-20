@@ -1,5 +1,7 @@
 from __future__ import unicode_literals
 
+import logging
+
 from django.contrib.auth.models import Group
 from ledger.accounts.models import EmailUser
 from wildlifecompliance import settings
@@ -12,6 +14,9 @@ from confy import env
 
 DEBUG = env('DEBUG', False)
 BASIC_AUTH = env('BASIC_AUTH', False)
+
+logger = logging.getLogger(__name__)
+# logger = logging
 
 def belongs_to(user, group_name):
     """
@@ -35,7 +40,10 @@ def belongs_to_list(user, group_names):
 
 def is_model_backend(request):
     # Return True if user logged in via single sign-on (i.e. an internal)
-    print request.session.get('_auth_user_backend')
+    logger.debug(
+        'helpers.is_model_backend(): {0}'.format(
+            request.session.get('_auth_user_backend')
+        ))
     return 'ModelBackend' in request.session.get('_auth_user_backend')
 
 
@@ -54,6 +62,24 @@ def is_wildlifecompliance_admin(request):
                request.user.is_superuser or
                request.user.groups.filter(name__in=['Wildlife Compliance Admin - Licensing', 'Wildlife Compliance Admin - Compliance']).exists()
            )
+
+
+def is_wildlifecompliance_payment_officer(request):
+    '''
+    Check user for request has payment officer permissions.
+
+    :return: boolean
+    '''
+    PAYMENTS_GROUP_NAME = 'Wildlife Compliance - Payment Officers'
+
+    is_payment_officer = request.user.is_authenticated() and \
+        is_model_backend(request) and \
+        in_dbca_domain(request) and \
+        (
+            request.user.groups.filter(name__in=[PAYMENTS_GROUP_NAME]).exists()
+        )
+
+    return is_payment_officer
 
 
 def in_dbca_domain(request):

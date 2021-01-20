@@ -48,7 +48,12 @@
                         </div>
                         <div class="row">
                             <div class="col-md-3">
-                                <label class="control-label pull-left" >Name of Supplier/Recipient:</label>
+                                <label class="control-label pull-left" >Name of</label>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <label class="control-label pull-left" >Supplier/Recipient:</label>
                             </div>
                             <div class="col-md-9">
                                 <input style="width: 95%;" type='text' v-model='entrySupplier' >
@@ -57,7 +62,11 @@
                         <div class="row">
                             <div class="col-md-3">
                                 <label class="control-label pull-left" >Keeper, Import or Export</label>
-                                <label>Licence number:</label>
+                            </div>
+                        </div>                        
+                        <div class="row">
+                            <div class="col-md-3">
+                                <label class="control-label pull-left" >Licence number:</label>
                             </div>
                             <div class="col-md-9">
                                 <input style="width: 95%;" type='text' v-model='entryLicence' >
@@ -195,6 +204,9 @@ export default {
             this.entryTotal = parseInt(this.currentStock)
         };
       },
+      addToList: function() {
+
+      },
       update:function () {
         const self = this;
 
@@ -226,6 +238,10 @@ export default {
               self.row_of_data.row.add(_data).node().id = newRowId;
               self.row_of_data.draw();
               self.species_cache[self.returns.sheet_species] = self.return_table.data();
+              let species_name = '[NOT SAVED] ' + self.returns.species_list[self.returns.sheet_species]
+              self.returns.species_saved[self.returns.sheet_species] = species_name
+              self.returns.species = self.returns.sheet_species
+
               self.close();
           }
 

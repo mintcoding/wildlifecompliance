@@ -1,7 +1,11 @@
+import os
 import datetime
+import logging
+
 from django.urls import reverse
 from ledger.accounts.models import EmailUser
 from wildlifecompliance import settings
+from wildlifecompliance.helpers import is_internal
 from wildlifecompliance.components.applications.models import (
     Application,
     ApplicationUserAction,
@@ -23,6 +27,7 @@ from wildlifecompliance.components.organisations.models import (
 from wildlifecompliance.components.licences.models import (
     LicenceActivity,
     PurposeSpecies,
+    LicenceCategory,
 )
 from wildlifecompliance.components.main.serializers import (
     CommunicationLogEntrySerializer
@@ -39,6 +44,9 @@ from wildlifecompliance.management.permissions_manager import PermissionUser
 
 from rest_framework import serializers
 
+logger = logging.getLogger(__name__)
+# logger = logging
+
 
 class EmailUserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -50,6 +58,73 @@ class EmailUserSerializer(serializers.ModelSerializer):
             'last_name',
             'title',
             'organisation')
+
+
+class LicenceCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LicenceCategory
+        fields = ('id', 'name', 'short_name')
+
+
+class DTApplicationSelectSerializer(serializers.ModelSerializer):
+    '''
+    Serializer for all list selects required for application dashboard.
+    '''
+    all_category = serializers.SerializerMethodField(read_only=True)
+    all_status = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Application
+        fields = (
+            'all_category',
+            'all_status',
+        )
+
+    def get_all_category(self, obj):
+        '''
+        Returns all licence types available for applications.
+        '''
+        qs = LicenceCategory.objects.all()
+        serializer = LicenceCategorySerializer(qs, many=True)
+
+        return serializer.data
+
+    def get_all_status(self, obj):
+        '''
+        returns all status types available for either internal or external
+        application.
+        '''
+        # Displayable text for drop-down.
+        N1 = 'Draft'
+        N2 = 'Under Review'
+        N3 = 'Awaiting Payment'
+        N4 = 'Approved'
+        N5 = 'Partially Approved'
+        N6 = 'Declined'
+        N7 = 'Discarded'
+
+        data = [
+            {'id': Application.CUSTOMER_STATUS_DRAFT, 'name': N1},
+            {'id': Application.CUSTOMER_STATUS_UNDER_REVIEW, 'name': N2},
+            {'id': Application.CUSTOMER_STATUS_AWAITING_PAYMENT, 'name': N3},
+            {'id': Application.CUSTOMER_STATUS_ACCEPTED, 'name': N4},
+            {'id': Application.CUSTOMER_STATUS_PARTIALLY_APPROVED, 'name': N5},
+            {'id': Application.CUSTOMER_STATUS_DECLINED, 'name': N6},
+        ],
+
+        if is_internal:
+            data = [
+                {'id': Application.PROCESSING_STATUS_DRAFT, 'name': N1},
+                {'id': Application.PROCESSING_STATUS_UNDER_REVIEW, 'name': N2},
+                {'id': Application.PROCESSING_STATUS_AWAITING_PAYMENT, 'name': N3},
+                {'id': Application.PROCESSING_STATUS_APPROVED, 'name': N4},
+                {'id': Application.PROCESSING_STATUS_PARTIALLY_APPROVED, 'name': N5},
+                {'id': Application.PROCESSING_STATUS_DECLINED, 'name': N6},
+                {'id': Application.PROCESSING_STATUS_DISCARDED, 'name': N7},
+            ],
+
+        return data[0]
+
 
 class ApplicationSelectedActivityCanActionSerializer(serializers.Serializer):
     """
@@ -124,7 +199,11 @@ class ApplicationSelectedActivityPurposeSerializer(
         from wildlifecompliance.components.licences.serializers import (
             PurposeSerializer
         )
-        return PurposeSerializer(obj.purpose).data
+        logger.debug('SelectedActivityPurposeSerializer.purpose() - start')
+        purpose = PurposeSerializer(obj.purpose).data
+        logger.debug('SelectedActivityPurposeSerializer.purpose() - end')
+
+        return purpose
 
     def get_start_date(self, obj):
         return obj.start_date.strftime(
@@ -145,6 +224,7 @@ class ApplicationSelectedActivityPurposeSerializer(
             '%d/%m/%Y') if obj.proposed_end_date else ''
 
     def get_purpose_species_json(self, obj):
+        logger.debug('SelectedActivityPurposeSerializer.species() - start')
         text = []
         if obj.purpose_species_json:
 
@@ -155,6 +235,7 @@ class ApplicationSelectedActivityPurposeSerializer(
             text = PurposeSpeciesSerializer(
                 obj.purpose.purpose_species, many=True
             ).data
+        logger.debug('SelectedActivityPurposeSerializer.species() - end')
 
         return text
 
@@ -178,14 +259,8 @@ class ApplicationSelectedActivitySerializer(serializers.ModelSerializer):
     licensing_officers = EmailUserSerializer(many=True)
     issuing_officers = EmailUserSerializer(many=True)
     is_with_officer = serializers.SerializerMethodField(read_only=True)
-    # proposed_purposes = serializers.SerializerMethodField(read_only=True)
     proposed_purposes = ApplicationSelectedActivityPurposeSerializer(
         many=True)
-    # additional_fee_text = serializers.CharField(
-    #     required=False, allow_null=True)
-    # additional_fee = serializers.DecimalField(
-    #     max_digits=7, decimal_places=2, required=False, allow_null=True)
-    # previous_paid_amount = serializers.SerializerMethodField(read_only=True)
     has_inspection = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
@@ -211,21 +286,28 @@ class ApplicationSelectedActivitySerializer(serializers.ModelSerializer):
         return [{'label': 'Approved', 'value': 'approved'}, {'label': 'Declined', 'value': 'declined'}]
 
     def get_purposes(self, obj):
-        from wildlifecompliance.components.licences.serializers import PurposeSerializer
-        return PurposeSerializer(obj.purposes, many=True).data
+        from wildlifecompliance.components.licences.serializers import (
+            PurposeSerializer
+        )
+        logger.debug('SelectedActivitySerializer.get_purposes() - start')
+        purposes = PurposeSerializer(obj.purposes, many=True).data
+        logger.debug('SelectedActivitySerializer.get_purposes() - end')
 
-    # def get_proposed_purposes(self, obj):
-    #     return ApplicationSelectedActivityPurposeSerializer(
-    #         obj.proposed_purposes, many=True).data
+        return purposes
 
     def get_issued_purposes(self, obj):
-        from wildlifecompliance.components.licences.serializers\
-             import PurposeSerializer
+        from wildlifecompliance.components.licences.serializers import (
+            PurposeSerializer
+        )
+        logger.debug('SelectedActivitySerializer.issued_purposes() - start')
         purposes = obj.issued_purposes
+        issued_purposes = PurposeSerializer(purposes, many=True).data
+        logger.debug('SelectedActivitySerializer.issued_purposes() - end')
 
-        return PurposeSerializer(purposes, many=True).data
+        return issued_purposes
 
     def get_activity_purpose_names(self, obj):
+        logger.debug('SelectedActivitySerializer.purpose_names() - start')
         purposes = [
             p.purpose for p in obj.proposed_purposes.all()
         ]
@@ -234,12 +316,22 @@ class ApplicationSelectedActivitySerializer(serializers.ModelSerializer):
                 == ApplicationSelectedActivity.PROPOSED_ACTION_DEFAULT:
             purposes = obj.purposes
 
-        return ','.join([p.name for p in purposes])
+        purpose_names = ','.join([p.name for p in purposes])
+        logger.debug('SelectedActivitySerializer.purpose_names() - end')
+
+        return purpose_names
 
     def get_can_pay_licence_fee(self, obj):
-        return not obj.licence_fee_paid and obj.processing_status == ApplicationSelectedActivity.PROCESSING_STATUS_AWAITING_LICENCE_FEE_PAYMENT
+        logger.debug('SelectedActivitySerializer.pay_licence() - start')
+        AWAIT = ApplicationSelectedActivity.PROCESSING_STATUS_AWAITING_LICENCE_FEE_PAYMENT
+        pay_licence = not obj.licence_fee_paid \
+            and obj.processing_status == AWAIT
+        logger.debug('SelectedActivitySerializer.pay_licence() - end')
+
+        return pay_licence
 
     def get_officer_name(self, obj):
+        logger.debug('SelectedActivitySerializer.officer_name() - start')
 
         with_officer = ['with_officer', 'with_officer_conditions']
         with_approver = ['with_officer_finalisation']
@@ -255,6 +347,7 @@ class ApplicationSelectedActivitySerializer(serializers.ModelSerializer):
             )
         else:
             name = ''
+        logger.debug('SelectedActivitySerializer.officer_name() - end')
 
         return name
 
@@ -262,71 +355,12 @@ class ApplicationSelectedActivitySerializer(serializers.ModelSerializer):
         return True if obj.processing_status in [
             'with_officer', 'with_officer_conditions'] else False
 
-    # def get_previous_paid_amount(self, obj):
-    #     return obj.previous_paid_amount if obj.previous_paid_amount else None
-
     def get_has_inspection(self, obj):
-        return obj.has_inspection
+        logger.debug('SelectedActivitySerializer.has_inspection() - start')
+        has_inspection = obj.has_inspection
+        logger.debug('SelectedActivitySerializer.has_inspection() - end')
 
-
-#class ApplicationSelectedActivityDashboardSerializer(serializers.ModelSerializer):
-#    activity_name_str = serializers.SerializerMethodField(read_only=True)
-#    activity_purpose_names = serializers.SerializerMethodField(read_only=True)
-#    processing_status = CustomChoiceField(read_only=True)
-#    can_action = ApplicationSelectedActivityCanActionSerializer(read_only=True)        # 4s
-#    payment_status = serializers.CharField(read_only=True)                             # 6s
-#    can_pay_licence_fee = serializers.SerializerMethodField()                          # 6s
-#    officer_name = serializers.SerializerMethodField(read_only=True)
-#
-#    class Meta:
-#        model = ApplicationSelectedActivity
-#        #fields = '__all__'
-#        fields = (
-#            'activity_name_str',
-#            'activity_purpose_names',
-#            'processing_status',
-#            'can_action',
-#            'payment_status',
-#            'can_pay_licence_fee',
-#            'officer_name',
-#        )
-#
-#    def get_activity_name_str(self, obj):
-#        return obj.licence_activity.name if obj.licence_activity else ''
-#
-#    def get_activity_purpose_names(self, obj):
-#        purposes = [
-#            p.purpose for p in obj.proposed_purposes.all()
-#        ]
-#
-#        if obj.proposed_action \
-#                == ApplicationSelectedActivity.PROPOSED_ACTION_DEFAULT:
-#            purposes = obj.purposes
-#
-#        return ','.join([p.name for p in purposes])
-#
-#    def get_can_pay_licence_fee(self, obj):
-#        return not obj.licence_fee_paid and obj.processing_status == ApplicationSelectedActivity.PROCESSING_STATUS_AWAITING_LICENCE_FEE_PAYMENT
-#        #return obj.processing_status == ApplicationSelectedActivity.PROCESSING_STATUS_AWAITING_LICENCE_FEE_PAYMENT
-#
-#    def get_officer_name(self, obj):
-#
-#        with_officer = ['with_officer', 'with_officer_conditions']
-#        with_approver = ['with_officer_finalisation']
-#        if obj.processing_status in with_officer and obj.assigned_officer:
-#            name = '{0} {1}'.format(
-#                obj.assigned_officer.first_name,
-#                obj.assigned_officer.last_name
-#            )
-#        elif obj.processing_status in with_approver and obj.assigned_approver:
-#            name = '{0} {1}'.format(
-#                obj.assigned_approver.first_name,
-#                obj.assigned_approver.last_name
-#            )
-#        else:
-#            name = ''
-#
-#        return name
+        return has_inspection
 
 
 class ExternalApplicationSelectedActivitySerializer(serializers.ModelSerializer):
@@ -637,8 +671,9 @@ class ExternalApplicationSelectedActivityMergedSerializer(serializers.Serializer
 
 class EmailUserAppViewSerializer(serializers.ModelSerializer):
     residential_address = UserAddressSerializer()
-    identification = DocumentSerializer()
+    # identification = DocumentSerializer()
     dob = serializers.SerializerMethodField(read_only=True)
+    identification = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = EmailUser
@@ -654,6 +689,15 @@ class EmailUserAppViewSerializer(serializers.ModelSerializer):
                   'email',
                   'phone_number',
                   'mobile_number',)
+
+    def get_identification(self, obj):
+        uid = None
+        if obj.identification:
+            id_file = 'media/' + str(obj.identification.file)
+            if os.path.exists(id_file):
+                uid = DocumentSerializer(obj.identification).data
+
+        return uid
 
     def get_dob(self, obj):
 
@@ -813,6 +857,8 @@ class ApplicationFormDataRecordSerializer(serializers.ModelSerializer):
 
 
 class BaseApplicationSerializer(serializers.ModelSerializer):
+    base_activities = None
+
     org_applicant = OrganisationSerializer()
     proxy_applicant = EmailUserAppViewSerializer()
     readonly = serializers.SerializerMethodField(read_only=True)
@@ -944,8 +990,15 @@ class BaseApplicationSerializer(serializers.ModelSerializer):
             'licence_activity_names')['licence_activity_names']
 
     def get_activities(self, obj):
-        return ApplicationSelectedActivitySerializer(
-            obj.activities, many=True).data
+        logger.debug('BaseApplicationSerializer.get_activities() - start')
+
+        activities = ApplicationSelectedActivitySerializer(
+            obj.activities, many=True
+        ).data
+
+        logger.debug('BaseApplicationSerializer.get_activities() - end')
+
+        return activities
 
     def get_amendment_requests(self, obj):
         amendment_request_data = []
@@ -965,6 +1018,7 @@ class BaseApplicationSerializer(serializers.ModelSerializer):
         A check that the application is in the correct processing status and
         current user is authorised (assigned) for the processing status.
         '''
+        logger.debug('BaseApplicationSerializer.can_process() - start')
         with_approver = [
             ApplicationSelectedActivity.PROCESSING_STATUS_OFFICER_FINALISATION
         ]
@@ -979,43 +1033,46 @@ class BaseApplicationSerializer(serializers.ModelSerializer):
             ApplicationSelectedActivity.PROCESSING_STATUS_AWAITING_LICENCE_FEE_PAYMENT,
         ]
 
+        # if not self.base_activities:
+        self.base_activities = obj.activities
+
         assigned_officer = [
-            a for a in obj.activities
+            a for a in self.base_activities
             if a.processing_status in with_officer and a.assigned_officer
             and not a.assigned_officer == self.context['request'].user
         ]
         assigned_approver = [
-            a for a in obj.activities
+            a for a in self.base_activities
             if a.processing_status in with_approver and a.assigned_approver
             and not a.assigned_approver == self.context['request'].user
         ]
         is_assigned = len(assigned_officer) or len(assigned_approver)
 
-        can_be_processed = obj.activities.exclude(
+        can_be_processed = self.base_activities.exclude(
             processing_status__in=exclude,
         ).exists()
+        logger.debug('BaseApplicationSerializer.can_process() - end')
 
         return can_be_processed and not is_assigned
 
     def get_processed(self, obj):
         """ check if any activities have been processed (i.e. licence issued)"""
-        return True if obj.activities.filter(processing_status__in=[
+        logger.debug('BaseApplicationSerializer.get_processed() - start')
+
+        if not self.base_activities:
+            self.base_activities = obj.activities
+
+        processed = True if self.base_activities.filter(processing_status__in=[
             ApplicationSelectedActivity.PROCESSING_STATUS_ACCEPTED,
             ApplicationSelectedActivity.PROCESSING_STATUS_DECLINED,
         ]).first() else False
 
+        logger.debug('BaseApplicationSerializer.get_processed() - end')
+        return processed
+
     def get_can_current_user_edit(self, obj):
+        logger.debug('BaseApplicationSerializer.can_user_edit() - start')
         result = False
-        # is_proxy_applicant = False
-        # is_in_org_applicant = False
-        # is_app_licence_officer = self.context['request'].user in obj.licence_officers
-        # is_submitter = obj.submitter == self.context['request'].user
-        # if obj.proxy_applicant:
-        #     is_proxy_applicant = obj.proxy_applicant == self.context['request'].user
-        # if obj.org_applicant:
-        #     user_orgs = [
-        #         org.id for org in self.context['request'].user.wildlifecompliance_organisations.all()]
-        #     is_in_org_applicant = obj.org_applicant_id in user_orgs
 
         if obj.customer_status == \
                 Application.CUSTOMER_STATUS_AWAITING_PAYMENT:
@@ -1026,29 +1083,16 @@ class BaseApplicationSerializer(serializers.ModelSerializer):
             result = True
         else:
             result = obj.can_user_edit
+        logger.debug('BaseApplicationSerializer.can_user_edit() - end')
 
-        # if obj.customer_status == Application.CUSTOMER_STATUS_AWAITING_PAYMENT\
-        #    and (is_submitter or is_proxy_applicant or is_in_org_applicant):
-        #     # Allow Payment to be paid by applicant with Continue link.
-        #     return True
-
-        # if result and (
-        #     is_app_licence_officer or is_submitter or is_proxy_applicant
-        #     or is_in_org_applicant
-        #    ):
-        #     result = True
-
-        # if result and (
-        #     is_app_licence_officer
-        #     or is_submitter
-        #     or is_proxy_applicant
-        #     or is_in_org_applicant):
-        #         result = True
         return result
 
     def get_can_user_view(self, obj):
+        logger.debug('BaseApplicationSerializer.can_user_view() - start')
         result = True if obj.customer_status == \
             Application.CUSTOMER_STATUS_AWAITING_PAYMENT else obj.can_user_view
+        logger.debug('BaseApplicationSerializer.can_user_view() - end')
+
         return result
 
     def get_invoice_url(self, obj):
@@ -1088,6 +1132,7 @@ class BaseApplicationSerializer(serializers.ModelSerializer):
         Builds a url link to ledger for all invoices associated with this
         application.
         """
+        logger.debug('BaseApplicationSerializer.all_payments_url() - start')
         url = None
 
         # url for all invoices on app.
@@ -1113,6 +1158,7 @@ class BaseApplicationSerializer(serializers.ModelSerializer):
                 settings.WC_PAYMENT_SYSTEM_URL_INV,
                 invoice_str,
             )
+        logger.debug('BaseApplicationSerializer.all_payments_url() - end')
 
         return url
 
@@ -1126,29 +1172,24 @@ class BaseApplicationSerializer(serializers.ModelSerializer):
         """
         Total paid amount adjusted for presentation purposes. Only applicable
         for internal officers to enforce refundable payments.
-
-        TODO: REDUNDANT
         """
-        # adjusted = None
-        # # Include previously paid amounts for amendments.
-        # adjusted = obj.total_paid_amount + obj.previous_paid_amount
+        import decimal
+        logger.debug('BaseApplicationSerializer.adj_paid_amount() - start')
+        licence_fee = decimal.Decimal(obj.get_property_cache_licence_fee() * 1)
+        adj_application_fee = obj.application_fee
+        adj_licence_fee = licence_fee
 
-        # if obj.processing_status == \
-        #   Application.PROCESSING_STATUS_UNDER_REVIEW:
-        #     # when Under Review, fee for amendment is paid and included in
-        #     # previous paid amount as well as total paid amount. Need to
-        #     # exclude this previous amount.
-        #     adjusted = adjusted - obj.previous_paid_amount
+        if obj.total_paid_amount == (obj.application_fee + licence_fee):
+            # force zero amounts for submitted applications without subsequent
+            # changes to form questions (no recalculation occur).
+            adj_application_fee = 0
+            adj_licence_fee = 0
 
-        # # licence fee is paid with the application fee. Licence fee needs
-        # # to be excluded from total paid for application.
-        # licence_fee_paid = 0
-        # for activity in obj.activities:
-        #     licence_fee_paid += activity.licence_fee
-        # adjusted = adjusted - licence_fee_paid
-
-        adjusted = 0
-
+        adjusted = {
+            'application_fee': adj_application_fee,
+            'licence_fee': adj_licence_fee
+        }
+        logger.debug('BaseApplicationSerializer.adj_paid_amount() - end')
         return adjusted
 
     def get_is_reception_paper(self, obj):
@@ -1628,6 +1669,7 @@ class InternalApplicationSerializer(BaseApplicationSerializer):
         read_only_fields = ('documents', 'conditions')
 
     def get_activities(self, obj):
+        logger.debug('InternalApplicationSerializer.get_activities() - start')
         user = self.context['request'].user
         if user is None:
             return []
@@ -1635,27 +1677,21 @@ class InternalApplicationSerializer(BaseApplicationSerializer):
             application_id=obj.id
         )
 
-        """
-        # Uncomment to filter out activities that the internal user cannot assess / process (to hide activity tabs on the UI).
-        if not user.has_perm('wildlifecompliance.system_administrator'):
-            for activity in application_activities:
-                if not user.has_wildlifelicenceactivity_perm([
-                    'assessor',
-                    'licensing_officer',
-                    'issuing_officer',
-                ], activity.licence_activity_id):
-                    application_activities = application_activities.exclude(licence_activity_id=activity.licence_activity_id)
-        """
+        activities = ApplicationSelectedActivitySerializer(
+            application_activities, many=True).data
 
-        return ApplicationSelectedActivitySerializer(application_activities, many=True).data
+        logger.debug('InternalApplicationSerializer.get_activities() - end')
+        return activities
 
     def get_readonly(self, obj):
         return True
 
     def get_licences(self, obj):
+        logger.debug('InternalApplicationSerializer.get_licences() - start')
         licence_data = []
-        active_licences = obj.get_licences_by_status(ApplicationSelectedActivity.ACTIVITY_STATUS_CURRENT)
-
+        active_licences = obj.get_licences_by_status(
+            ApplicationSelectedActivity.ACTIVITY_STATUS_CURRENT
+        )
         for licence in active_licences:
             for activity in licence.current_activities:
                 licence_data.append(
@@ -1665,34 +1701,64 @@ class InternalApplicationSerializer(BaseApplicationSerializer):
                         "licence_activity_id": activity.licence_activity_id,
                         "start_date": activity.start_date,
                         "expiry_date": activity.expiry_date})
+
+        logger.debug('InternalApplicationSerializer.get_licences() - end')
         return licence_data
 
     def get_processed(self, obj):
         """ check if any activities have been processed """
-        return True if obj.activities.filter(processing_status__in=[
-            ApplicationSelectedActivity.PROCESSING_STATUS_ACCEPTED,
-            ApplicationSelectedActivity.PROCESSING_STATUS_DECLINED
-        ]).first() else False
+        logger.debug('InternalApplicationSerializer.get_processed() - start')
+
+        if not self.base_activities:
+            self.base_activities = obj.activities
+
+        is_processed = True if self.base_activities.filter(
+            processing_status__in=[
+                ApplicationSelectedActivity.PROCESSING_STATUS_ACCEPTED,
+                ApplicationSelectedActivity.PROCESSING_STATUS_DECLINED
+            ]
+        ).first() else False
+
+        logger.debug('InternalApplicationSerializer.get_processed() - end')
+        return is_processed
 
     def get_user_in_licence_officers(self, obj):
+        logger.debug('InternalApplicationSerializer.get_processed() - start')
+        is_in_officers = False
         if self.context['request'].user and self.context['request'].user in obj.licence_officers:
-            return True
-        return False
+            is_in_officers = True
+
+        logger.debug('InternalApplicationSerializer.get_processed() - end')
+        return is_in_officers
 
     def get_user_roles(self, obj):
+        logger.debug('InternalApplicationSerializer.get_user_roles() - start')
         try:
             user = self.context['request'].user
         except (KeyError, AttributeError):
             return []
 
-        available_roles = ['assessor', 'licensing_officer', 'issuing_officer', 'return_curator']
-        is_administrator = user.has_perm('wildlifecompliance.system_administrator')
+        available_roles = [
+            'assessor',
+            'licensing_officer',
+            'issuing_officer',
+            'return_curator'
+        ]
+        is_administrator = user.has_perm(
+            'wildlifecompliance.system_administrator'
+        )
         roles = []
         perm_user = PermissionUser(user)
         for activity in obj.selected_activities.all():
             for role in available_roles:
                 if is_administrator or perm_user.has_wildlifelicenceactivity_perm(role, activity.licence_activity_id):
-                    roles.append({'activity_id': activity.licence_activity_id, 'role': role})
+                    roles.append(
+                        {
+                            'activity_id': activity.licence_activity_id,
+                            'role': role
+                        })
+
+        logger.debug('InternalApplicationSerializer.get_user_roles() - end')
         return roles
 
 

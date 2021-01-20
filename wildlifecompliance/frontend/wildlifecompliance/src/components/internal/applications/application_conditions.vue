@@ -194,6 +194,14 @@ export default {
                 return false;
             }
 
+            // check activity is not assigned to another officer.
+            var selectedActivity = this.application.activities.find(activity => {
+                return activity.licence_activity === this.selected_activity_tab_id;
+            });
+            if (selectedActivity.assigned_officer != null && selectedActivity.assigned_officer !== this.current_user.id) {
+                return false;
+            };
+
             let required_role = false;
             if (this.activity.processing_status.id === 'with_assessor') {
                 let assessment = this.canEditAssessmentFor(this.selected_activity_tab_id)
@@ -223,6 +231,14 @@ export default {
             if(!this.selected_activity_tab_id || this.activity == null) {
                 return false;
             }
+
+            // check activity is not assigned to another officer.
+            var selectedActivity = this.application.activities.find(activity => {
+                return activity.licence_activity === this.selected_activity_tab_id;
+            });
+            if (selectedActivity.assigned_officer != null && selectedActivity.assigned_officer !== this.current_user.id) {
+                return false;
+            };
 
             let required_role = false;
             switch(this.activity.processing_status.id) {
@@ -275,7 +291,7 @@ export default {
                 confirmButtonColor:'#d9534f'
             }).then((result) => {
                 if (result.value) {
-                    vm.$http.delete(helpers.add_endpoint_json(api_endpoints.application_conditions,_id))
+                    vm.$http.delete(helpers.add_endpoint_json(api_endpoints.application_conditions,_id+'/delete'))
                     .then((response) => {
                         vm.$refs.conditions_datatable.vmDataTable.ajax.reload();
                     }, (error) => {

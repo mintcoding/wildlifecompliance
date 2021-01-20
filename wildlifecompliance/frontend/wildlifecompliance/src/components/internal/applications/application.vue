@@ -105,7 +105,9 @@
                                     </div>   
                                     <div v-if="!applicationIsDraft && canRequestAmendment" class="row">
                                         <div class="col-sm-12">
-                                            <button class="btn btn-primary top-buffer-s col-xs-12" @click.prevent="amendmentRequest()">Request Amendment</button><br/>
+                                            <button v-if="showRequestSpinner && showSpinner" class="btn btn-primary top-buffer-s col-xs-12" ><i class="fa fa-spinner fa-spin"/>Request Amendment</button>
+                                            <button v-else-if="!showRequestSpinner && showSpinner" disabled type="button" class="btn btn-primary top-buffer-s col-xs-12" >Request Amendment</button>
+                                            <button v-else class="btn btn-primary top-buffer-s col-xs-12" @click.prevent="amendmentRequest()">Request Amendment</button><br/>
                                         </div>
                                     </div>                            
                                     <div v-if="canIssueDecline" class="row">
@@ -117,7 +119,8 @@
                                     </div>
                                     <div v-show="showAssessmentConditionButton" class="row">
                                         <div class="col-sm-12">
-                                            <button v-if="showSpinner" disabled type="button" class="btn btn-primary top-buffer-s col-xs-12" ><i class="fa fa-spinner fa-spin"/>Assessments &amp; Conditions</button>
+                                            <button v-if="showConditionSpinner && showSpinner" class="btn btn-primary top-buffer-s col-xs-12" ><i class="fa fa-spinner fa-spin"/>Assessments &amp; Conditions</button>
+                                            <button v-else-if="!showConditionSpinner && showSpinner" disabled type="button" class="btn btn-primary top-buffer-s col-xs-12" >Assessments &amp; Conditions</button>
                                             <button v-else class="btn btn-primary top-buffer-s col-xs-12" @click.prevent="togglesendtoAssessor()">Assessments &amp; Conditions</button><br/>
                                         </div>
                                     </div>
@@ -406,7 +409,7 @@
                                 <div v-if="applicantType == 'proxy'" class="panel-body panel-collapse collapse" :id="contactsBody">
                                   <form class="form-horizontal">
                                       <div class="form-group">
-                                        <label for="" class="col-sm-3 control-label">Phone (work)</label>
+                                        <label for="" class="col-sm-3 control-label">Phone</label>
                                         <div class="col-sm-6">
                                             <input disabled type="text" class="form-control" name="applicantPhoneNumber" placeholder="" v-model="application.proxy_applicant.phone_number">
                                         </div>
@@ -428,7 +431,7 @@
                                 <div v-if="applicantType == 'submitter'" class="panel-body panel-collapse collapse" :id="contactsBody">
                                   <form class="form-horizontal">
                                       <div class="form-group">
-                                        <label for="" class="col-sm-3 control-label">Phone (work)</label>
+                                        <label for="" class="col-sm-3 control-label">Phone</label>
                                         <div class="col-sm-6">
                                             <input disabled type="text" class="form-control" name="applicantPhoneNumber" placeholder="" v-model="application.submitter.phone_number">
                                         </div>
@@ -483,7 +486,7 @@
                                         <button v-if="isCharacterCheckAccepted" disabled class="btn btn-light">Accepted</button>
                                     </div>
                                     <div class="col-sm-4">
-                                        <button v-if="isCharacterCheckAccepted"  class="btn btn-primary">Reset</button>
+                                        <button v-if="isCharacterCheckAccepted" @click.prevent="resetCharacterRequest()" class="btn btn-primary">Reset</button>
                                     </div>
                                 </div>
                                 <div class="row">
@@ -520,10 +523,11 @@
                                                 <div class="container">
                                                     <p class="pull-right" style="margin-top:5px;">
                                                         <span style="margin-right: 5px; font-size: 18px; display: block;" v-if="updatedFee" >
-                                                            <strong>Updated application fee: {{adjusted_application_fee | toCurrency}}</strong>
+                                                            <strong>Updated application fee: {{application.application_fee | toCurrency}}</strong>
                                                             <strong>licence fee: {{application.licence_fee | toCurrency}}</strong>
-                                                        </span>   
-                                                        <button v-if="showSpinner" type="button" class="btn btn-primary" ><i class="fa fa-spinner fa-spin"/>Saving</button>                                                    
+                                                        </span>
+                                                        <button v-if="showSpinner && showRequestSpinner" type="button" disabled class="btn btn-primary" >Save Changes</button> 
+                                                        <button v-else-if="showSpinner && !showRequestSpinner" type="button" class="btn btn-primary" ><i class="fa fa-spinner fa-spin"/>Saving</button>                                                    
                                                         <button v-else="!applicationIsDraft && canSaveApplication" class="btn btn-primary" @click.prevent="save()">Save Changes</button>
                                                     </p>
                                                 </div>
@@ -588,6 +592,13 @@
     <ProposedLicence ref="proposed_licence" @refreshFromResponse="refreshFromResponse"></ProposedLicence>
 
     </div>
+    <div v-else>
+        <br/><br/><br/><br/><br/><br/><br/><br/>
+        <div class="col-md-12">
+            <center><i class="fa fa-4x fa-spinner fa-spin"/></center>
+        </div>
+    </div>
+
 </div>
 </template>
 <script>
@@ -634,6 +645,8 @@ export default {
             contacts_table_id: vm._uid+'contacts-table',
             application_assessor_datatable:vm._uid+'assessment-table',
             spinner: false,
+            request_spinner: false,
+            condition_spinner: false,
             contacts_options:{
                 language: {
                     processing: "<i class='fa fa-4x fa-spinner fa-spin'></i>"
@@ -646,6 +659,7 @@ export default {
                 columns: [
                     {
                         title: 'Name',
+                        data:'last_name',
                         mRender:function (data,type,full) {
                             return full.first_name + " " + full.last_name;
                         }
@@ -677,7 +691,6 @@ export default {
             comms_add_url: helpers.add_endpoint_json(api_endpoints.applications,vm.$route.params.application_id+'/add_comms_log'),
             logs_url: helpers.add_endpoint_json(api_endpoints.applications,vm.$route.params.application_id+'/action_log'),
             panelClickersInitialised: false,
-            adjusted_application_fee: 0,
         }
     },
     components: {
@@ -723,6 +736,9 @@ export default {
             'canAssignOfficerFor',
             'canAssignAssessorFor',
             'application_workflow_state',
+            'id_check_status',
+            'character_check_status',
+            'return_check_status',
         ]),
         applicationDetailsVisible: function() {
             return !this.isSendingToAssessor && !this.isofficerfinalisation && this.unfinishedActivities.length && !this.isOfficerConditions;
@@ -785,6 +801,11 @@ export default {
         canProposeIssueOrDecline: function(){
             let auth_activity = this.canAssignOfficerFor(this.selected_activity_tab_id);
 
+            // check activity is not assigned to another officer.
+            if (auth_activity && auth_activity.assigned_officer != null && auth_activity.assigned_officer !== this.current_user.id) {
+                return false;
+            }
+
             let proposal = auth_activity && auth_activity.is_with_officer && this.licence_type_data.activity.find(activity => {
                     return activity.id === this.selected_activity_tab_id
                         && activity.processing_status.name.match(/with officer/gi) // FIXME: required because of temporary status set below.
@@ -814,19 +835,19 @@ export default {
           return (this.application) ? `/api/application/${this.application.id}/application_officer_save.json` : '';
         },
         isIdCheckAccepted: function(){
-            return this.application.id_check_status.id == 'accepted';
+            return this.id_check_status === 'accepted';
         },
         isIdNotChecked: function(){
-            return this.application.id_check_status.id == 'not_checked';
+            return this.id_check_status === 'not_checked';
         },
         isIdCheckRequested: function(){
-            return this.application.id_check_status.id == 'awaiting_update';
+            return this.id_check_status === 'awaiting_update';
         },
         isIdCheckUpdated: function(){
-            return this.application.id_check_status.id == 'updated';
+            return this.id_check_status === 'updated';
         },
         isCharacterCheckAccepted: function(){
-            return this.application.character_check_status.id == 'accepted';
+            return this.character_check_status === 'accepted';
         },
         userIsAssignedOfficer: function(){
             return this.current_user.id == this.selectedActivity.assigned_officer;
@@ -851,7 +872,7 @@ export default {
             }
         },
         updatedFee: function() {
-            return (this.adjusted_application_fee !== 0 || this.application.licence_fee !== 0) ? true : false
+            return (this.application.application_fee !== 0 || this.application.licence_fee !== 0) ? true : false
         },
         showNavBarBottom: function() {
             return this.canReturnToConditions || (!this.applicationIsDraft && this.canSaveApplication)
@@ -879,8 +900,15 @@ export default {
         showSpinner: function() {
             return this.spinner
         },
+        showRequestSpinner: function() {
+            return this.request_spinner
+        },
+        showConditionSpinner: function() {
+            return this.condition_spinner
+        },
         showReturnCheckButton: function() {
-            return this.application.is_return_check_accept ? false : true
+            // return this.application.is_return_check_accept ? false : true
+            return this.return_check_status !== 'accepted';
         }
     },
     methods: {
@@ -896,6 +924,11 @@ export default {
             'toggleFinalisedTabs',
             'saveFormData',
             'assessmentData',
+            'setIdCheckStatus',
+            'setCharacterCheckStatus',
+            'setReturnCheckStatus',
+            'resetUpdateFeeStatus',
+            'setAssessStatus',
         ]),
         eventListeners: function(){
             let vm = this;
@@ -977,7 +1010,7 @@ export default {
                 if (result.value) {
                     await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/accept_id_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setIdCheckStatus(response.body.id_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -997,7 +1030,7 @@ export default {
                 if (result.value) {
                     await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/reset_id_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setIdCheckStatus(response.body.id_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -1017,7 +1050,7 @@ export default {
                 if (result.value) {
                     await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/request_id_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setIdCheckStatus(response.body.id_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -1037,7 +1070,27 @@ export default {
                 if (result.value) {
                     await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/accept_character_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setCharacterCheckStatus(response.body.character_check_status);
+                    }, (error) => {
+                        console.log(error);
+                    });
+                }
+            },(error) => {
+            });
+        },
+        resetCharacterRequest: async function() {
+            let vm = this;
+            swal({
+                title: "Reset Character Check",
+                text: "Are you sure you want to reset this Character Check?",
+                type: "question",
+                showCancelButton: true,
+                confirmButtonText: 'Accept'
+            }).then(async (result) => {
+                if (result.value) {
+                    await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/reset_character_check')))
+                    .then((response) => {
+                        vm.setCharacterCheckStatus(response.body.character_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -1057,7 +1110,7 @@ export default {
                 if (result.value) {
                     await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/accept_return_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setReturnCheckStatus(response.body.return_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -1077,7 +1130,7 @@ export default {
                 if (result.value) {
                     await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/reset_return_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setReturnCheckStatus(response.body.return_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -1086,9 +1139,10 @@ export default {
             });
         },
         amendmentRequest: async function(){
+            this.request_spinner = true
             let vm = this;
             let is_saved = await vm.save_wo();
-
+            this.request_spinner = false
             if (is_saved){
                 vm.$refs.amendment_request.amendment.text = '';
                 vm.$refs.amendment_request.isModalOpen = true;
@@ -1096,20 +1150,36 @@ export default {
 
         },
         togglesendtoAssessor: async function(){
-            this.spinner = true
-            await this.assessmentData({ url: `/api/application/${this.application.id}/assessment_data.json` }).then( async response => {
-                this.spinner = false;   
+            this.condition_spinner = true;
+            let is_saved = false;
+            
+            if (this.canRequestAmendment) {
+                is_saved = await this.save_wo();
+
+            } else {
+                this.condition_spinner = false;   
                 $('#tabs-main li').removeClass('active');
                 this.isSendingToAssessor = !this.isSendingToAssessor;
                 this.showingApplication = false;
+            }           
 
-            },(error)=>{
-                swal(
-                    'Application Error',
-                    helpers.apiVueResourceError(error),
-                    'error'
-                )
-            });
+            if (is_saved) {
+                await this.assessmentData({ url: `/api/application/${this.application.id}/assessment_data.json` }).then( async response => {
+                    this.condition_spinner = false;   
+                    $('#tabs-main li').removeClass('active');
+                    this.setAssessStatus(false);
+                    this.isSendingToAssessor = !this.isSendingToAssessor;
+                    this.showingApplication = false;
+
+                },(error)=>{
+                    console.log(error)
+                    swal(
+                        'Application Error',
+                        helpers.apiVueResourceError(error),
+                        'error'
+                    )
+                });
+            }
         },
         save: async function(props = { showNotification: true }) {
             this.spinner = true;
@@ -1117,7 +1187,8 @@ export default {
             // await this.saveFormData({ url: this.form_data_comments_url }).then( async response => {
 
                 await this.saveFormData({ url: this.form_data_application_url }).then(response => {
-                    this.spinner = false;   
+                    this.spinner = false;
+                    this.resetUpdateFeeStatus();
                     showNotification && swal(
                         'Saved',
                         'Your application has been saved',
@@ -1226,6 +1297,9 @@ export default {
         },
         assignToMe: async function(){
             let vm = this;
+            vm.selectedActivity.assigned_officer = vm.current_user.id
+            $(vm.$refs.assigned_officer).val(vm.current_user.id);
+            $(vm.$refs.assigned_offcier).trigger('change');
             const data = {
                 "activity_id" : this.selectedActivity.licence_activity,
             }
@@ -1233,8 +1307,8 @@ export default {
                 emulateJSON:true
 
             }).then((response) => {
-                this.refreshFromResponse(response);
-                vm.updateAssignedOfficerSelect();
+                // this.refreshFromResponse(response);
+                // vm.updateAssignedOfficerSelect();
             }, (error) => {
                 vm.revert();
                 vm.updateAssignedOfficerSelect();
@@ -1271,8 +1345,8 @@ export default {
                 await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/assign_officer')),JSON.stringify(data),{
                     emulateJSON:true
                 }).then((response) => {
-                    this.refreshFromResponse(response);
-                    this.updateAssignedOfficerSelect();
+                    // this.refreshFromResponse(response);
+                    // this.updateAssignedOfficerSelect();
                 }, (error) => {
                     this.revert();
                     this.updateAssignedOfficerSelect();
@@ -1287,8 +1361,8 @@ export default {
                 await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/unassign_officer')),JSON.stringify(data),{
                     emulateJSON:true
                 }).then((response) => {
-                    this.refreshFromResponse(response);
-                    this.updateAssignedOfficerSelect();
+                    // this.refreshFromResponse(response);
+                    // this.updateAssignedOfficerSelect();
                 }, (error) => {
                     this.revert();
                     this.updateAssignedOfficerSelect();
@@ -1314,8 +1388,8 @@ export default {
                 await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/assign_activity_approver')),JSON.stringify(data),{
                     emulateJSON:true
                 }).then((response) => {
-                    this.refreshFromResponse(response);
-                    this.updateAssignedApproverSelect();
+                    // this.refreshFromResponse(response);
+                    // this.updateAssignedApproverSelect();
                 }, (error) => {
                     this.revert();
                     this.updateAssignedApproverSelect();
@@ -1330,8 +1404,8 @@ export default {
                 await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/unassign_activity_approver')),JSON.stringify(data),{
                     emulateJSON:true
                 }).then((response) => {
-                    this.refreshFromResponse(response);
-                    this.updateAssignedOfficerSelect();
+                    // this.refreshFromResponse(response);
+                    // this.updateAssignedOfficerSelect();
                 }, (error) => {
                     this.revert();
                     this.updateAssignedOfficerSelect();
@@ -1345,6 +1419,9 @@ export default {
         },
         makeMeApprover: async function(){
             let vm = this;
+            vm.selectedActivity.assigned_approver = vm.current_user.id
+            $(vm.$refs.assigned_approver).val(vm.current_user.id);
+            $(vm.$refs.assigned_approver).trigger('change');
             const data = {
                 "activity_id" : this.selectedActivity.licence_activity,
             }
@@ -1352,9 +1429,8 @@ export default {
                 emulateJSON:true
 
             }).then((response) => {
-                this.refreshFromResponse(response);
-                this.updateAssignedApproverSelect();
-
+                // this.refreshFromResponse(response);
+                // this.updateAssignedApproverSelect();
             }, (error) => {
                 this.revert();
                 this.updateAssignedApproverSelect();
@@ -1480,15 +1556,6 @@ export default {
             vm.form = document.forms.new_application;
             vm.eventListeners();
         });
-        if ((this.application.application_type.id=='amend_activity') // licence activity amendments.
-        || (this.application.customer_status.id=='amendment_required' || this.application.customer_status.id=='under_review')) { // requested amendments.
-            // fees can be adjusted by officer from selected components for requested amendments.
-            // this.adjusted_application_fee = this.application.application_fee - this.application.adjusted_paid_amount
-        } else {
-            // no adjustments for new applications.
-            // this.adjusted_application_fee = this.application.application_fee
-        }
-        this.adjusted_application_fee = this.application.application_fee
     },
     beforeRouteEnter: function(to, from, next) {
         next(vm => {
