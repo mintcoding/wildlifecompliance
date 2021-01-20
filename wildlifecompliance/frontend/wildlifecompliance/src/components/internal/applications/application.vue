@@ -103,12 +103,14 @@
                                             <button class="btn btn-primary top-buffer-s col-xs-12" @click.prevent="returnToOfficerConditions()">Return to Officer - Conditions</button>                                   
                                         </div>
                                     </div>   
-                                    <div v-if="!applicationIsDraft && canRequestAmendment && !requiresRefund" class="row">
+                                    <div v-if="!applicationIsDraft && canRequestAmendment" class="row">
                                         <div class="col-sm-12">
-                                            <button class="btn btn-primary top-buffer-s col-xs-12" @click.prevent="amendmentRequest()">Request Amendment</button><br/>
+                                            <button v-if="showRequestSpinner && showSpinner" class="btn btn-primary top-buffer-s col-xs-12" ><i class="fa fa-spinner fa-spin"/>Request Amendment</button>
+                                            <button v-else-if="!showRequestSpinner && showSpinner" disabled type="button" class="btn btn-primary top-buffer-s col-xs-12" >Request Amendment</button>
+                                            <button v-else class="btn btn-primary top-buffer-s col-xs-12" @click.prevent="amendmentRequest()">Request Amendment</button><br/>
                                         </div>
                                     </div>                            
-                                    <div v-if="canIssueDecline & !requiresRefund" class="row">
+                                    <div v-if="canIssueDecline" class="row">
                                         <div class="col-sm-12">
                                             <button class="btn btn-primary top-buffer-s col-xs-12" @click.prevent="toggleIssue()">Issue/Decline</button>
                                             <!-- v-if="!userIsAssignedOfficer" was removed to enforce permission at group membership only. -->
@@ -117,7 +119,9 @@
                                     </div>
                                     <div v-show="showAssessmentConditionButton" class="row">
                                         <div class="col-sm-12">
-                                            <button class="btn btn-primary top-buffer-s col-xs-12" @click.prevent="togglesendtoAssessor()">Assessments &amp; Conditions</button><br/>
+                                            <button v-if="showConditionSpinner && showSpinner" class="btn btn-primary top-buffer-s col-xs-12" ><i class="fa fa-spinner fa-spin"/>Assessments &amp; Conditions</button>
+                                            <button v-else-if="!showConditionSpinner && showSpinner" disabled type="button" class="btn btn-primary top-buffer-s col-xs-12" >Assessments &amp; Conditions</button>
+                                            <button v-else class="btn btn-primary top-buffer-s col-xs-12" @click.prevent="togglesendtoAssessor()">Assessments &amp; Conditions</button><br/>
                                         </div>
                                     </div>
                                 </template>
@@ -154,7 +158,7 @@
 
                 <ApplicationAssessments v-if="isSendingToAssessor || isOfficerConditions" />
 
-                <template v-if="applicationDetailsVisible">
+                <template v-if="applicationDetailsVisible && showingApplication">
                     <div>
                     <ul class="nav nav-pills mb-3" id="tabs-main">
                         <li class="nav-item"><a ref="applicantTab" class="nav-link" data-toggle="pill" :href="'#'+applicantTab">Applicant</a></li>
@@ -405,7 +409,7 @@
                                 <div v-if="applicantType == 'proxy'" class="panel-body panel-collapse collapse" :id="contactsBody">
                                   <form class="form-horizontal">
                                       <div class="form-group">
-                                        <label for="" class="col-sm-3 control-label">Phone (work)</label>
+                                        <label for="" class="col-sm-3 control-label">Phone</label>
                                         <div class="col-sm-6">
                                             <input disabled type="text" class="form-control" name="applicantPhoneNumber" placeholder="" v-model="application.proxy_applicant.phone_number">
                                         </div>
@@ -427,7 +431,7 @@
                                 <div v-if="applicantType == 'submitter'" class="panel-body panel-collapse collapse" :id="contactsBody">
                                   <form class="form-horizontal">
                                       <div class="form-group">
-                                        <label for="" class="col-sm-3 control-label">Phone (work)</label>
+                                        <label for="" class="col-sm-3 control-label">Phone</label>
                                         <div class="col-sm-6">
                                             <input disabled type="text" class="form-control" name="applicantPhoneNumber" placeholder="" v-model="application.submitter.phone_number">
                                         </div>
@@ -482,13 +486,17 @@
                                         <button v-if="isCharacterCheckAccepted" disabled class="btn btn-light">Accepted</button>
                                     </div>
                                     <div class="col-sm-4">
-                                        <button v-if="isCharacterCheckAccepted"  class="btn btn-primary">Reset</button>
+                                        <button v-if="isCharacterCheckAccepted" @click.prevent="resetCharacterRequest()" class="btn btn-primary">Reset</button>
                                     </div>
                                 </div>
                                 <div class="row">
                                     <div class="col-sm-4">Returns Check</div>
                                     <div class="col-sm-4">
-                                        <button v-if="isCharacterCheckAccepted" class="btn btn-primary">Request Completion</button>
+                                        <button v-show="showReturnCheckButton" class="btn btn-primary" @click.prevent="acceptReturnRequest()">Accept</button>
+                                        <button v-show="!showReturnCheckButton" disabled class="btn btn-light">Accepted</button>
+                                    </div>
+                                    <div class="col-sm-4">
+                                        <button v-show="!showReturnCheckButton" @click.prevent="resetReturnRequest()" class="btn btn-primary">Reset</button>
                                     </div>
                                 </div>
                             </div>
@@ -514,11 +522,13 @@
                                             <div class="navbar-inner">
                                                 <div class="container">
                                                     <p class="pull-right" style="margin-top:5px;">
-                                                        <span style="margin-right: 5px; font-size: 18px; display: block;" v-if="requiresRefund" >
-                                                            <strong>Estimated application fee: {{adjusted_application_fee | toCurrency}}</strong>
-                                                            <strong>Estimated licence fee: {{application.licence_fee | toCurrency}}</strong>
+                                                        <span style="margin-right: 5px; font-size: 18px; display: block;" v-if="updatedFee" >
+                                                            <strong>Updated application fee: {{application.application_fee | toCurrency}}</strong>
+                                                            <strong>licence fee: {{application.licence_fee | toCurrency}}</strong>
                                                         </span>
-                                                        <button v-if="!applicationIsDraft && canSaveApplication" class="btn btn-primary" @click.prevent="save()">Save Changes</button>
+                                                        <button v-if="showSpinner && showRequestSpinner" type="button" disabled class="btn btn-primary" >Save Changes</button> 
+                                                        <button v-else-if="showSpinner && !showRequestSpinner" type="button" class="btn btn-primary" ><i class="fa fa-spinner fa-spin"/>Saving</button>                                                    
+                                                        <button v-else="!applicationIsDraft && canSaveApplication" class="btn btn-primary" @click.prevent="save()">Save Changes</button>
                                                     </p>
                                                 </div>
                                             </div>
@@ -540,7 +550,7 @@
                 <p>The licence has been issued and has been emailed to {{ application.applicant }}.</p>
                 <p>Licence: <a :href="application.permit" target="_blank" >licence.pdf</a></p>
             </div>
-            <div v-else class="col-md-12 alert alert-warning">
+            <div class="col-md-12 alert alert-danger" v-if="application.processing_status.name !== 'Approved'">
                 <p>The application is not approved. An update to the status was emailed to {{application.applicant}}</p>
             </div>
         </div>
@@ -556,7 +566,7 @@
                             </h3>
                         </div>
                         <div class="panel-body panel-collapse collapse" :id="decisionBody">
-                            <div v-for="activity in application.activities.filter(activity => activity.decision_action==='issued')">
+                            <div v-for="activity in application.activities.filter(activity => ['issue_refund','issued'].includes(activity.decision_action))">
                                 <div class="col-sm-12">
                                     <strong>&nbsp;</strong><br/>
                                     <strong>Licence Activity: {{ activity.activity_name_str }}</strong><br/>
@@ -582,6 +592,13 @@
     <ProposedLicence ref="proposed_licence" @refreshFromResponse="refreshFromResponse"></ProposedLicence>
 
     </div>
+    <div v-else>
+        <br/><br/><br/><br/><br/><br/><br/><br/>
+        <div class="col-md-12">
+            <center><i class="fa fa-4x fa-spinner fa-spin"/></center>
+        </div>
+    </div>
+
 </div>
 </template>
 <script>
@@ -627,6 +644,9 @@ export default {
             isofficerfinalisation:false,
             contacts_table_id: vm._uid+'contacts-table',
             application_assessor_datatable:vm._uid+'assessment-table',
+            spinner: false,
+            request_spinner: false,
+            condition_spinner: false,
             contacts_options:{
                 language: {
                     processing: "<i class='fa fa-4x fa-spinner fa-spin'></i>"
@@ -639,6 +659,7 @@ export default {
                 columns: [
                     {
                         title: 'Name',
+                        data:'last_name',
                         mRender:function (data,type,full) {
                             return full.first_name + " " + full.last_name;
                         }
@@ -670,7 +691,6 @@ export default {
             comms_add_url: helpers.add_endpoint_json(api_endpoints.applications,vm.$route.params.application_id+'/add_comms_log'),
             logs_url: helpers.add_endpoint_json(api_endpoints.applications,vm.$route.params.application_id+'/action_log'),
             panelClickersInitialised: false,
-            adjusted_application_fee: 0,
         }
     },
     components: {
@@ -715,6 +735,10 @@ export default {
             'canRequestAmendmentFor',
             'canAssignOfficerFor',
             'canAssignAssessorFor',
+            'application_workflow_state',
+            'id_check_status',
+            'character_check_status',
+            'return_check_status',
         ]),
         applicationDetailsVisible: function() {
             return !this.isSendingToAssessor && !this.isofficerfinalisation && this.unfinishedActivities.length && !this.isOfficerConditions;
@@ -759,6 +783,14 @@ export default {
             return this.canRequestAmendment;
         },
         canRequestAmendment: function(){
+            // check activity is not assigned to another officer.
+            if (this.selectedActivity.assigned_officer != null && this.selectedActivity.assigned_officer !== this.current_user.id) {
+                return false;
+            }
+            // check activity is not reissued.
+            if (this.selectedActivity.decision_action === 'reissue'){
+                return false;
+            }
             // check authorisation
             return this.canRequestAmendmentFor(this.selected_activity_tab_id);
         },
@@ -769,10 +801,20 @@ export default {
         canProposeIssueOrDecline: function(){
             let auth_activity = this.canAssignOfficerFor(this.selected_activity_tab_id);
 
+            // check activity is not assigned to another officer.
+            if (auth_activity && auth_activity.assigned_officer != null && auth_activity.assigned_officer !== this.current_user.id) {
+                return false;
+            }
+
             let proposal = auth_activity && auth_activity.is_with_officer && this.licence_type_data.activity.find(activity => {
                     return activity.id === this.selected_activity_tab_id
                         && activity.processing_status.name.match(/with officer/gi) // FIXME: required because of temporary status set below.
                 });                                                                // processing_status.id not related to processing_status.name
+
+            if (this.application_workflow_state){
+                // presentation frontend state is incomplete.
+                proposal = false;
+            }
 
             // officer can Issue or Decline without conditions so set temporary status.
             return proposal ? proposal.processing_status.id = 'with_officer_conditions' : false;
@@ -793,19 +835,19 @@ export default {
           return (this.application) ? `/api/application/${this.application.id}/application_officer_save.json` : '';
         },
         isIdCheckAccepted: function(){
-            return this.application.id_check_status.id == 'accepted';
+            return this.id_check_status === 'accepted';
         },
         isIdNotChecked: function(){
-            return this.application.id_check_status.id == 'not_checked';
+            return this.id_check_status === 'not_checked';
         },
         isIdCheckRequested: function(){
-            return this.application.id_check_status.id == 'awaiting_update';
+            return this.id_check_status === 'awaiting_update';
         },
         isIdCheckUpdated: function(){
-            return this.application.id_check_status.id == 'updated';
+            return this.id_check_status === 'updated';
         },
         isCharacterCheckAccepted: function(){
-            return this.application.character_check_status.id == 'accepted';
+            return this.character_check_status === 'accepted';
         },
         userIsAssignedOfficer: function(){
             return this.current_user.id == this.selectedActivity.assigned_officer;
@@ -829,8 +871,8 @@ export default {
                 break;
             }
         },
-        requiresRefund: function() {
-            return this.adjusted_application_fee<0 ? true : false
+        updatedFee: function() {
+            return (this.application.application_fee !== 0 || this.application.licence_fee !== 0) ? true : false
         },
         showNavBarBottom: function() {
             return this.canReturnToConditions || (!this.applicationIsDraft && this.canSaveApplication)
@@ -842,10 +884,11 @@ export default {
             return this.showingApplication && this.canAssignApproverFor(this.selectedActivity.licence_activity)
         },
         showAssessmentConditionButton: function() {
+
             return this.showingApplication 
                 && !this.applicationIsDraft 
                 && (this.hasRole('licensing_officer') || this.hasRole('issuing_officer'))
-                && !this.requiresRefund
+
         },
         showFinalDecision: function() {
             if (['awaiting_payment'].includes(this.application.processing_status.id)) { // prevent processing for outstanding payments.
@@ -853,6 +896,19 @@ export default {
                 this.isSendingToAssessor=false
             }
             return (!this.showingApplication || !this.unfinishedActivities.length) && !this.isSendingToAssessor && !this.canIssueDecline
+        },
+        showSpinner: function() {
+            return this.spinner
+        },
+        showRequestSpinner: function() {
+            return this.request_spinner
+        },
+        showConditionSpinner: function() {
+            return this.condition_spinner
+        },
+        showReturnCheckButton: function() {
+            // return this.application.is_return_check_accept ? false : true
+            return this.return_check_status !== 'accepted';
         }
     },
     methods: {
@@ -867,6 +923,12 @@ export default {
             'loadCurrentUser',
             'toggleFinalisedTabs',
             'saveFormData',
+            'assessmentData',
+            'setIdCheckStatus',
+            'setCharacterCheckStatus',
+            'setReturnCheckStatus',
+            'resetUpdateFeeStatus',
+            'setAssessStatus',
         ]),
         eventListeners: function(){
             let vm = this;
@@ -912,8 +974,7 @@ export default {
         commaToNewline(s){
             return s.replace(/[,;]/g, '\n');
         },
-        proposedDecline: function(){
-            this.save_wo();
+        proposedDecline: async function(){
             this.$refs.proposed_decline.isModalOpen = true;
         },
         isActivityVisible: function(activity_id) {
@@ -922,24 +983,22 @@ export default {
         hasActivityStatus: function(status_list, status_count=1, required_role=null) {
             return this.checkActivityStatus(status_list, status_count, required_role);
         },
-        proposedLicence: function(){
+        proposedLicence: async function(){
             var activity_name=[]
             var selectedTabTitle = $("#tabs-section li.active");
-            this.save_wo();
             this.$refs.proposed_licence.propose_issue.licence_activity_id=this.selected_activity_tab_id;
             this.$refs.proposed_licence.propose_issue.licence_activity_name=selectedTabTitle.text();
             this.$refs.proposed_licence.isModalOpen = true;
             this.$refs.proposed_licence.preloadLastActivity();
         },
-        toggleIssue:function(){
-            this.save_wo();
+        toggleIssue: async function(){
             this.showingApplication = false;
             this.isSendingToAssessor=false;
             this.isOfficerConditions=false;
 
             this.isofficerfinalisation=true;
         },
-        acceptIdRequest: function() {
+        acceptIdRequest: async function() {
             let vm = this;
             swal({
                 title: "Accept ID Check",
@@ -947,11 +1006,11 @@ export default {
                 type: "question",
                 showCancelButton: true,
                 confirmButtonText: 'Accept'
-            }).then((result) => {
+            }).then(async (result) => {
                 if (result.value) {
-                    vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/accept_id_check')))
+                    await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/accept_id_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setIdCheckStatus(response.body.id_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -959,7 +1018,7 @@ export default {
             },(error) => {
             });
         },
-        resetIdRequest: function() {
+        resetIdRequest: async function() {
             let vm = this;
             swal({
                 title: "Reset ID Check",
@@ -967,11 +1026,11 @@ export default {
                 type: "question",
                 showCancelButton: true,
                 confirmButtonText: 'Accept'
-            }).then((result) => {
+            }).then(async (result) => {
                 if (result.value) {
-                    vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/reset_id_check')))
+                    await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/reset_id_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setIdCheckStatus(response.body.id_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -979,7 +1038,7 @@ export default {
             },(error) => {
             });
         },
-        updateIdRequest: function() {
+        updateIdRequest: async function() {
             let vm = this;
             swal({
                 title: "Request Update ID Check",
@@ -987,11 +1046,11 @@ export default {
                 type: "question",
                 showCancelButton: true,
                 confirmButtonText: 'Accept'
-            }).then((result) => {
+            }).then(async (result) => {
                 if (result.value) {
-                    vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/request_id_check')))
+                    await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/request_id_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setIdCheckStatus(response.body.id_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -999,7 +1058,7 @@ export default {
             },(error) => {
             });
         },
-        acceptCharacterRequest: function() {
+        acceptCharacterRequest: async function() {
             let vm = this;
             swal({
                 title: "Accept Character Check",
@@ -1007,11 +1066,11 @@ export default {
                 type: "question",
                 showCancelButton: true,
                 confirmButtonText: 'Accept'
-            }).then((result) => {
+            }).then(async (result) => {
                 if (result.value) {
-                    vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/accept_character_check')))
+                    await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/accept_character_check')))
                     .then((response) => {
-                        vm.setApplication(response.body);
+                        vm.setCharacterCheckStatus(response.body.character_check_status);
                     }, (error) => {
                         console.log(error);
                     });
@@ -1019,24 +1078,117 @@ export default {
             },(error) => {
             });
         },
-        amendmentRequest: function(){
+        resetCharacterRequest: async function() {
             let vm = this;
-            vm.save_wo();
+            swal({
+                title: "Reset Character Check",
+                text: "Are you sure you want to reset this Character Check?",
+                type: "question",
+                showCancelButton: true,
+                confirmButtonText: 'Accept'
+            }).then(async (result) => {
+                if (result.value) {
+                    await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/reset_character_check')))
+                    .then((response) => {
+                        vm.setCharacterCheckStatus(response.body.character_check_status);
+                    }, (error) => {
+                        console.log(error);
+                    });
+                }
+            },(error) => {
+            });
+        },
+        acceptReturnRequest: async function() {
+            let vm = this;
+            swal({
+                title: "Accept Return Check",
+                text: "Are you sure you want to accept this Return Check?",
+                type: "question",
+                showCancelButton: true,
+                confirmButtonText: 'Accept'
+            }).then(async (result) => {
+                if (result.value) {
+                    await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/accept_return_check')))
+                    .then((response) => {
+                        vm.setReturnCheckStatus(response.body.return_check_status);
+                    }, (error) => {
+                        console.log(error);
+                    });
+                }
+            },(error) => {
+            });
+        },
+        resetReturnRequest: async function() {
+            let vm = this;
+            swal({
+                title: "Reset Return Check",
+                text: "Are you sure you want to reset this Return Check?",
+                type: "question",
+                showCancelButton: true,
+                confirmButtonText: 'Accept'
+            }).then(async (result) => {
+                if (result.value) {
+                    await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/reset_return_check')))
+                    .then((response) => {
+                        vm.setReturnCheckStatus(response.body.return_check_status);
+                    }, (error) => {
+                        console.log(error);
+                    });
+                }
+            },(error) => {
+            });
+        },
+        amendmentRequest: async function(){
+            this.request_spinner = true
+            let vm = this;
+            let is_saved = await vm.save_wo();
+            this.request_spinner = false
+            if (is_saved){
+                vm.$refs.amendment_request.amendment.text = '';
+                vm.$refs.amendment_request.isModalOpen = true;
+            }
 
-            vm.$refs.amendment_request.amendment.text = '';
-            vm.$refs.amendment_request.isModalOpen = true;
         },
-        togglesendtoAssessor:function(){
-            this.save_wo();
-            $('#tabs-main li').removeClass('active');
-            this.isSendingToAssessor = !this.isSendingToAssessor;
-            this.showingApplication = false;
+        togglesendtoAssessor: async function(){
+            this.condition_spinner = true;
+            let is_saved = false;
+            
+            if (this.canRequestAmendment) {
+                is_saved = await this.save_wo();
+
+            } else {
+                this.condition_spinner = false;   
+                $('#tabs-main li').removeClass('active');
+                this.isSendingToAssessor = !this.isSendingToAssessor;
+                this.showingApplication = false;
+            }           
+
+            if (is_saved) {
+                await this.assessmentData({ url: `/api/application/${this.application.id}/assessment_data.json` }).then( async response => {
+                    this.condition_spinner = false;   
+                    $('#tabs-main li').removeClass('active');
+                    this.setAssessStatus(false);
+                    this.isSendingToAssessor = !this.isSendingToAssessor;
+                    this.showingApplication = false;
+
+                },(error)=>{
+                    console.log(error)
+                    swal(
+                        'Application Error',
+                        helpers.apiVueResourceError(error),
+                        'error'
+                    )
+                });
+            }
         },
-        save: function(props = { showNotification: true }) {
+        save: async function(props = { showNotification: true }) {
+            this.spinner = true;
             const { showNotification } = props;
-            this.saveFormData({ url: this.form_data_comments_url }).then(response => {
+            // await this.saveFormData({ url: this.form_data_comments_url }).then( async response => {
 
-                this.saveFormData({ url: this.form_data_application_url }).then(response => {   
+                await this.saveFormData({ url: this.form_data_application_url }).then(response => {
+                    this.spinner = false;
+                    this.resetUpdateFeeStatus();
                     showNotification && swal(
                         'Saved',
                         'Your application has been saved',
@@ -1051,17 +1203,19 @@ export default {
                     )
                 });
 
-            }, error => {
-                console.log('Failed to save comments: ', error);
-                swal(
-                    'Application Error',
-                    helpers.apiVueResourceError(error),
-                    'error'
-                )
-            });
+            // }, error => {
+            //     console.log('Failed to save comments: ', error);
+            //     this.spinner = false;
+            //     swal(
+            //         'Application Error',
+            //         helpers.apiVueResourceError(error),
+            //         'error'
+            //     )
+            // });
         },
-        save_wo: function() {
-            return this.save({ showNotification: false });
+        save_wo: async function() {
+            await this.save({ showNotification: false });
+            return true
         },
         toggleApplication: function({show=false, showFinalised=false}){
 
@@ -1090,7 +1244,7 @@ export default {
             this.isSendingToAssessor=false;
             this.isOfficerConditions=false;
         },
-        returnToOfficerConditions: function(){
+        returnToOfficerConditions: async function(){
 
             swal({
                 title: 'Return to Officer - Conditions',
@@ -1104,7 +1258,7 @@ export default {
                 },
                 showCancelButton: true,
                 confirmButtonText: 'Return',
-                }).then((result) => {
+                }).then(async (result) => {
                     if(!result.value) {
                         return;
                     }
@@ -1113,15 +1267,12 @@ export default {
                         "activity_id" : this.selectedActivity.licence_activity,
                         "text": text
                     }
-                    this.$http.post(helpers.add_endpoint_json(
+                    await this.$http.post(helpers.add_endpoint_json(
                             api_endpoints.applications, (this.application.id+'/return_to_officer')
                         ), JSON.stringify(data)).then((response) => {
-                        swal(
-                            'Return to Officer - Conditions',
-                            'The licenced activity has been returned to Officer - Conditions.',
-                            'success'
-                        );
-                        this.refreshFromResponse(response);
+
+                        this.$router.push({name:"internal-dash",});   
+
                     }, (error) => {
                         this.revert();
                         swal(
@@ -1132,8 +1283,8 @@ export default {
                     });
                 })
         },
-        toggleOfficerConditions:function(){
-            this.save_wo();
+        toggleOfficerConditions: async function(){
+            let is_saved = await this.save_wo();
             this.showingApplication = false;
             this.isSendingToAssessor=false;
 
@@ -1144,17 +1295,20 @@ export default {
             $(vm.$refs.assigned_officer).val(vm.selectedActivity.assigned_officer);
             $(vm.$refs.assigned_officer).trigger('change');
         },
-        assignToMe: function(){
+        assignToMe: async function(){
             let vm = this;
+            vm.selectedActivity.assigned_officer = vm.current_user.id
+            $(vm.$refs.assigned_officer).val(vm.current_user.id);
+            $(vm.$refs.assigned_offcier).trigger('change');
             const data = {
                 "activity_id" : this.selectedActivity.licence_activity,
             }
-            vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/assign_to_me')),JSON.stringify(data),{
+            await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/assign_to_me')),JSON.stringify(data),{
                 emulateJSON:true
 
             }).then((response) => {
-                this.refreshFromResponse(response);
-                vm.updateAssignedOfficerSelect();
+                // this.refreshFromResponse(response);
+                // vm.updateAssignedOfficerSelect();
             }, (error) => {
                 vm.revert();
                 vm.updateAssignedOfficerSelect();
@@ -1178,7 +1332,7 @@ export default {
                 this.updateAssignedOfficerSelect();
             });
         },
-        assignOfficer: function(){
+        assignOfficer: async function(){
             let vm = this;
             let unassign = true;
             let data = {};
@@ -1188,11 +1342,11 @@ export default {
                 "activity_id" : this.selectedActivity.licence_activity,
             };
             if (!unassign){
-                vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/assign_officer')),JSON.stringify(data),{
+                await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/assign_officer')),JSON.stringify(data),{
                     emulateJSON:true
                 }).then((response) => {
-                    this.refreshFromResponse(response);
-                    this.updateAssignedOfficerSelect();
+                    // this.refreshFromResponse(response);
+                    // this.updateAssignedOfficerSelect();
                 }, (error) => {
                     this.revert();
                     this.updateAssignedOfficerSelect();
@@ -1204,11 +1358,11 @@ export default {
                 });
             }
             else{
-                vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/unassign_officer')),JSON.stringify(data),{
+                await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/unassign_officer')),JSON.stringify(data),{
                     emulateJSON:true
                 }).then((response) => {
-                    this.refreshFromResponse(response);
-                    this.updateAssignedOfficerSelect();
+                    // this.refreshFromResponse(response);
+                    // this.updateAssignedOfficerSelect();
                 }, (error) => {
                     this.revert();
                     this.updateAssignedOfficerSelect();
@@ -1220,7 +1374,7 @@ export default {
                 });
             }
         },
-        assignApprover: function(){
+        assignApprover: async function(){
             let vm = this;
             let unassign = true;
             unassign = vm.selectedActivity.assigned_approver == null ? true: false;
@@ -1231,11 +1385,11 @@ export default {
             }
 
             if (!unassign){
-                vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/assign_activity_approver')),JSON.stringify(data),{
+                await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/assign_activity_approver')),JSON.stringify(data),{
                     emulateJSON:true
                 }).then((response) => {
-                    this.refreshFromResponse(response);
-                    this.updateAssignedApproverSelect();
+                    // this.refreshFromResponse(response);
+                    // this.updateAssignedApproverSelect();
                 }, (error) => {
                     this.revert();
                     this.updateAssignedApproverSelect();
@@ -1247,11 +1401,11 @@ export default {
                 });
             }
             else{
-                vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/unassign_activity_approver')),JSON.stringify(data),{
+                await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/unassign_activity_approver')),JSON.stringify(data),{
                     emulateJSON:true
                 }).then((response) => {
-                    this.refreshFromResponse(response);
-                    this.updateAssignedOfficerSelect();
+                    // this.refreshFromResponse(response);
+                    // this.updateAssignedOfficerSelect();
                 }, (error) => {
                     this.revert();
                     this.updateAssignedOfficerSelect();
@@ -1263,18 +1417,20 @@ export default {
                 });
             }
         },
-        makeMeApprover: function(){
+        makeMeApprover: async function(){
             let vm = this;
+            vm.selectedActivity.assigned_approver = vm.current_user.id
+            $(vm.$refs.assigned_approver).val(vm.current_user.id);
+            $(vm.$refs.assigned_approver).trigger('change');
             const data = {
                 "activity_id" : this.selectedActivity.licence_activity,
             }
-            vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/make_me_activity_approver')),JSON.stringify(data),{
+            await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/make_me_activity_approver')),JSON.stringify(data),{
                 emulateJSON:true
 
             }).then((response) => {
-                this.refreshFromResponse(response);
-                this.updateAssignedApproverSelect();
-
+                // this.refreshFromResponse(response);
+                // this.updateAssignedApproverSelect();
             }, (error) => {
                 this.revert();
                 this.updateAssignedApproverSelect();
@@ -1285,13 +1441,13 @@ export default {
                 )
             });
         },
-        updateActivityStatus: function(activity_id, status){
+        updateActivityStatus: async function(activity_id, status){
             let vm = this;
             let data = {
                 'activity_id' : activity_id,
                 'status': status
             }
-            vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/update_activity_status')),JSON.stringify(data),{
+            await vm.$http.post(helpers.add_endpoint_json(api_endpoints.applications,(vm.application.id+'/update_activity_status')),JSON.stringify(data),{
                 emulateJSON:true,
             }).then((response) => {
                 this.refreshFromResponse(response);
@@ -1316,6 +1472,8 @@ export default {
                 placeholder:"Select Officer"
             }).
             on("select2:select",function (e) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
                 var selected = $(e.currentTarget);
                 vm.selectedActivity.assigned_officer = selected.val();
                 vm.assignOfficer();
@@ -1325,6 +1483,8 @@ export default {
                     self.select2('close');
                 }, 0);
             }).on("select2:unselect",function (e) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
                 var selected = $(e.currentTarget);
                 vm.selectedActivity.assigned_officer = null;
                 vm.assignOfficer();
@@ -1342,6 +1502,8 @@ export default {
                 placeholder: "Select Approver"
             }).
             on("select2:select",function (e) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
                 var selected = $(e.currentTarget);
                 vm.selectedActivity.assigned_approver = selected.val();
                 vm.assignApprover();
@@ -1351,6 +1513,8 @@ export default {
                     self.select2('close');
                 }, 0);
             }).on("select2:unselect",function (e) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
                 var selected = $(e.currentTarget);
                 vm.selectedActivity.assigned_approver = null;
                 vm.assignApprover();
@@ -1373,6 +1537,7 @@ export default {
         }
     },
     mounted: function() {
+        // console.log(this.application)
     },
     updated: function(){
         let vm = this;
@@ -1391,14 +1556,6 @@ export default {
             vm.form = document.forms.new_application;
             vm.eventListeners();
         });
-        if ((this.application.application_type.id=='amend_activity') // licence activity amendments.
-        || (this.application.customer_status.id=='amendment_required' || this.application.customer_status.id=='under_review')) { // requested amendments.
-            // fees can be adjusted by officer from selected components for requested amendments.
-            this.adjusted_application_fee = this.application.application_fee - this.application.adjusted_paid_amount
-        } else {
-            // no adjustments for new applications.
-            this.adjusted_application_fee = this.application.application_fee
-        }
     },
     beforeRouteEnter: function(to, from, next) {
         next(vm => {

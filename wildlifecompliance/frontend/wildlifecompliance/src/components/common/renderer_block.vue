@@ -18,6 +18,7 @@
         </FormSection>
 
         <Group v-if="component.type === 'group'"
+            :field_data="value"
             :label="component.label"
             :name="component_name"
             :id="element_id()"
@@ -30,6 +31,16 @@
                     v-bind:key="`group_${index}`"
                     />
         </Group>
+
+        <Group2 v-if="component.type === 'group2'"
+            :field_data="value"
+            :readonly="is_readonly"
+            :name="component_name"
+            :component="component"
+            :id="element_id()"
+            :label="component.label"
+            :help_text="help_text"
+            :help_text_url="help_text_url"/>
 
         <TextField v-if="component.type === 'text'"
             type="text"
@@ -258,7 +269,7 @@
             :field_data="value"
             :id="element_id()"
             :options="component.component_attribute"
-            :isMultiple="strToBool(component.isRepeatable)"
+            :isMultiple="true"
             :isRepeatable="strToBool(component.isRepeatable)"
             :help_text="help_text"
             :readonly="is_readonly"
@@ -280,6 +291,22 @@
                     />
         </SpeciesGroup>
 
+        <SpeciesFiltered v-if="component.type === 'species-all'"
+            :name="component.name"
+            :label="component.label"
+            :field_data="value"
+            :id="element_id()"
+            :options="component.component_attribute"
+            :isMultiple="false"
+            :isRepeatable="strToBool(component.isRepeatable)"
+            :help_text="help_text"
+            :readonly="is_readonly"
+            :isRequired="component.isRequired"
+            :handleChange="handleComponentChange(component, true)"
+            :help_text_url="help_text_url"
+            :filtered_list_url="application_url(component)"
+            />
+
     </span>
 </template>
 
@@ -289,9 +316,9 @@ import Vue from 'vue';
 import { mapActions, mapGetters } from 'vuex';
 import { helpers, api_endpoints } from "@/utils/hooks.js"
 import { strToBool } from "@/utils/helpers.js";
-
 import FormSection from '@/components/forms/section.vue'
 import Group from '@/components/forms/group.vue'
+import Group2 from '@/components/forms/group2.vue'
 import Radio from '@/components/forms/radio.vue'
 import Conditions from '@/components/forms/conditions.vue'
 import Checkbox from '@/components/forms/checkbox.vue'
@@ -311,6 +338,7 @@ import ExpanderTable from '@/components/forms/expander_table.vue'
 import GridBlock from '@/components/forms/grid.vue'
 import Species from '@/components/forms/select_species.vue'
 import SpeciesGroup from '@/components/forms/group_species.vue'
+import SpeciesFiltered from '@/components/forms/select_filtered.vue'
 
 const RendererBlock = {
   name: 'renderer-block',
@@ -318,6 +346,7 @@ const RendererBlock = {
       FormSection,
       TextField,
       Group,
+      Group2,
       SelectBlock,
       HelpText,
       HelpTextUrl,
@@ -334,6 +363,7 @@ const RendererBlock = {
       GridBlock,
       Species,
       SpeciesGroup,
+      SpeciesFiltered,
   },
   data: function() {
     return {
@@ -426,10 +456,16 @@ const RendererBlock = {
     element_id: function(depth=0) {
         return `id_${this.component_name}${(depth) ? `_${depth}` : ''}${this.instance !== null ? `__instance${this.instance}`: ''}`;
     },
+    application_url: function(component) {
+        if (component.type === 'species-all') {
+            return "/api/application/" + this.application_id + "/select_filtered_species/"
+        }
+
+        return ''
+    },
     replaceSitePlaceholders: function(text_string) {
         if(text_string && text_string.includes("site_url:/")) {
             text_string = text_string.replace('site_url:/', this.site_url);
-
             if (text_string.includes("anchor=")) {
                 text_string = text_string.replace('anchor=', "#");
             }
@@ -472,6 +508,5 @@ const RendererBlock = {
     },
   }
 }
-
 export default RendererBlock;
 </script>

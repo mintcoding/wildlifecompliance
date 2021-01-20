@@ -15,8 +15,8 @@ export const rendererStore = {
         sections: {},
         visible_components: [],
         visibility: {
-            'exclude_decisions': ['issued', 'declined'],
-            'exclude_processing_status': ['discarded']
+            'exclude_decisions': ['issued', 'declined', 'issue_refund'],
+            'exclude_processing_status': ['None']
         },
         form_data: {},
     },
@@ -65,8 +65,12 @@ export const rendererStore = {
             return state.form_data[component_name] ? state.form_data[component_name].value : null;
         },
         isComponentEditableForOfficer: (state, getters, rootState, rootGetters) => {
+            let activity = rootGetters.application.activities.filter(activity => {
+                return activity.licence_activity === rootGetters.selected_activity_tab_id;
+            })[0];
+            let is_assigned = activity.assigned_officer == null ? false : activity.assigned_officer === getters.current_user.id ? false : true
              // function to enforce editable rendered components for officer.
-            return rootGetters.canAssignOfficerFor(rootGetters.selected_activity_tab_id); // check permissions.
+            return !is_assigned && rootGetters.canAssignOfficerFor(rootGetters.selected_activity_tab_id); // check permissions.
         },
         allCurrentActivitiesWithAssessor: (state, getters, rootState, rootGetters) => {
             // list of activities with assessment sent for the current user.
@@ -137,9 +141,33 @@ export const rendererStore = {
                 commit(REMOVE_FORM_FIELD, key);
             }
         },
-        saveFormData({ dispatch, commit, getters }, { url, draft }) {
+        saveFormData({ dispatch, commit, getters, rootGetters }, { url, draft }) {
+            return new Promise((resolve, reject) => {
+                const post_data = Object.assign({'__draft': draft, '__update_fee': rootGetters.application.update_fee}, getters.renderer_form_data);
+                Vue.http.post(url, post_data).then(res => {
+                    resolve(res);
+                },
+                err => {
+                    console.log(err);
+                    reject(err);
+                });
+            })
+        },
+        finalDecisionData({ dispatch, commit, getters }, { url, draft }) {
             return new Promise((resolve, reject) => {
                 const post_data = Object.assign({'__draft': draft}, getters.renderer_form_data);
+                Vue.http.post(url, post_data).then(res => {
+                    resolve(res);
+                },
+                err => {
+                    console.log(err);
+                    reject(err);
+                });
+            })
+        },
+        assessmentData({ dispatch, commit, getters, rootGetters }, { url, draft }) {
+            return new Promise((resolve, reject) => {
+                const post_data = Object.assign({'__draft': draft, '__assess': rootGetters.application.assess}, getters.renderer_form_data);
                 Vue.http.post(url, post_data).then(res => {
                     resolve(res);
                 },

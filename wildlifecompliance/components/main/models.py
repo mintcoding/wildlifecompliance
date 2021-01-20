@@ -6,9 +6,34 @@ from django.utils.encoding import python_2_unicode_compatible
 from ledger.accounts.models import EmailUser
 import os
 from django.utils.translation import ugettext_lazy as _
-from django.contrib.postgres.fields.jsonb import JSONField
 
 logger = logging.getLogger(__name__)
+# logger = logging
+
+@python_2_unicode_compatible
+class SystemMaintenance(models.Model):
+    name = models.CharField(max_length=100)
+    description = models.TextField()
+    start_date = models.DateTimeField()
+    end_date = models.DateTimeField()
+
+    def duration(self):
+        """ Duration of system maintenance (in mins) """
+        return int(
+            (self.end_date - self.start_date).total_seconds()/60.
+        ) if self.end_date and self.start_date else ''
+
+    duration.short_description = 'Duration (mins)'
+
+    class Meta:
+        app_label = 'wildlifecompliance'
+        verbose_name_plural = "System maintenance"
+
+    def __str__(self):
+        return 'System Maintenance: {} ({}) - starting {}, ending {}'.format(
+            self.name, self.description, self.start_date, self.end_date
+        )
+
 
 @python_2_unicode_compatible
 class Sequence(models.Model):
@@ -51,6 +76,7 @@ class UserAction(models.Model):
     what = models.TextField(blank=False)
 
     def __str__(self):
+        logger.debug('UserAction.__str__()')
         return "{what} ({who} at {when})".format(
             what=self.what,
             who=self.who,
@@ -67,11 +93,13 @@ class CommunicationsLogEntry(models.Model):
     COMMUNICATIONS_LOG_TYPE_PHONE = 'phone'
     COMMUNICATIONS_LOG_TYPE_MAIL = 'mail'
     COMMUNICATIONS_LOG_TYPE_PERSON = 'person'
+    COMMUNICATIONS_LOG_TYPE_FILE = 'file_note'
     TYPE_CHOICES = (
         (COMMUNICATIONS_LOG_TYPE_EMAIL, 'Email'),
         (COMMUNICATIONS_LOG_TYPE_PHONE, 'Phone Call'),
         (COMMUNICATIONS_LOG_TYPE_MAIL, 'Mail'),
-        (COMMUNICATIONS_LOG_TYPE_PERSON, 'In Person')
+        (COMMUNICATIONS_LOG_TYPE_PERSON, 'In Person'),
+        (COMMUNICATIONS_LOG_TYPE_FILE, 'File Note')
     )
 
     to = models.TextField(blank=True, verbose_name="To")
@@ -135,10 +163,12 @@ def computed_filter_or_exclude(self, **kwargs):
     do_filter = kwargs.pop('__filter', True)
     matched_pk_list = [item.pk for item in self for (field, match) in map(
         lambda arg: (arg[0].replace('__in', ''),
-                     arg[1] if isinstance(arg[1], (list, QuerySet)) else [arg[1]]
+                     arg[1] if isinstance(arg[1], (list, QuerySet)) else [arg[
+                         1]]
                      ), kwargs.items()
     ) if getattr(item, field) in match]
-    return self.filter(pk__in=matched_pk_list) if do_filter else self.exclude(pk__in=matched_pk_list)
+    return self.filter(pk__in=matched_pk_list) if do_filter else self.exclude(
+        pk__in=matched_pk_list)
 
 
 queryset_methods = {
@@ -153,7 +183,7 @@ for method_name, method in queryset_methods.items():
 
 
 class TemporaryDocumentCollection(models.Model):
-    #input_name = models.CharField(max_length=255, null=True, blank=True)
+    # input_name = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:
         app_label = 'wildlifecompliance'
@@ -165,18 +195,23 @@ class TemporaryDocument(Document):
         TemporaryDocumentCollection,
         related_name='documents')
     _file = models.FileField(max_length=255)
-    #input_name = models.CharField(max_length=255, null=True, blank=True)
+    # input_name = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:
         app_label = 'wildlifecompliance'
 
-class GlobalSettings(models.Model):
-    keys = (
-            ('document_object_disposal_period', 'Document Object Disposal Period'),
-            ('physical_object_disposal_period', 'Physical Object Disposal Period'),
-            )
 
-    key = models.CharField(max_length=255, choices=keys, blank=False, null=False, unique=True)
+class GlobalSettings(models.Model):
+    LICENCE_RENEW_DAYS = 'licence_renew_days'
+
+    keys = (
+        ('document_object_disposal_period', 'Document Object Disposal Period'),
+        (LICENCE_RENEW_DAYS, 'Licence Renewal Period Days'),
+        ('physical_object_disposal_period', 'Physical Object Disposal Period'),
+    )
+
+    key = models.CharField(
+        max_length=255, choices=keys, blank=False, null=False, unique=True)
     value = models.CharField(max_length=255)
 
     class Meta:

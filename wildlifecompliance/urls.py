@@ -1,12 +1,16 @@
 import logging
 from django.conf import settings
+from django.contrib import admin
 from django.conf.urls import url, include
 from django.views.generic.base import TemplateView, RedirectView
 from django.conf.urls.static import static
 from rest_framework import routers
 
 from wildlifecompliance import views
-from wildlifecompliance.components.returns.views import ReturnSuccessView
+from wildlifecompliance.components.returns.views import (
+    ReturnSuccessView,
+    ReturnSheetSuccessView,
+)
 from wildlifecompliance.components.applications.views import (
     ApplicationSuccessView,
     LicenceFeeSuccessView,
@@ -14,7 +18,7 @@ from wildlifecompliance.components.applications.views import (
 from wildlifecompliance.admin import wildlifecompliance_admin_site
 
 from wildlifecompliance.components.main.views import (
-        SearchKeywordsView, 
+        SearchKeywordsView,
         SearchReferenceView,
         SearchWeakLinksView,
         CreateWeakLinkView,
@@ -121,8 +125,8 @@ router.register(r'disposal_methods', artifact_api.PhysicalArtifactDisposalMethod
 api_patterns = [url(r'^api/my_user_details/$',
                     users_api.GetMyUserDetails.as_view(),
                     name='get-my-user-details'),
-                url(r'^api/department_users$', 
-                    users_api.DepartmentUserList.as_view(), 
+                url(r'^api/department_users$',
+                    users_api.DepartmentUserList.as_view(),
                     name='department-users-list'),
                 url(r'^api/my_compliance_user_details/$',
                     users_api.GetComplianceUserDetails.as_view(),
@@ -181,6 +185,7 @@ urlpatterns = [
             url='https://www.dpaw.wa.gov.au/plants-and-animals/licences-and-permits'),
         name='wc_further_info'),
     url(r'^admin/', wildlifecompliance_admin_site.urls),
+    url(r'^ledger/admin/', admin.site.urls, name='ledger_admin'),
     url(r'^chaining/', include('smart_selects.urls')),
     url(r'', include(api_patterns)),
     url(r'^$', views.WildlifeComplianceRoutingView.as_view(), name='wc_home'),
@@ -207,7 +212,7 @@ urlpatterns = [
     # artifact emails to users
     url(r'^internal/object/(?P<artifact_id>\d+)/$', views.ApplicationView.as_view(),
         name='internal-artifact-detail'),
-    
+
     # following url is defined so that to include url path when sending
     # inspection emails to users
     url(r'^internal/inspection/(?P<inspection_id>\d+)/$', views.ApplicationView.as_view(),
@@ -231,17 +236,12 @@ urlpatterns = [
     url(r'^application/finish_licence_fee_payment/',
         LicenceFeeSuccessView.as_view(),
         name='external-licence-fee-success-invoice'),
-    url(r'^internal/application/(?P<application_pk>\d+)/$', views.ApplicationView.as_view(),
-        name='internal-application-detail'),
-    url(r'^application_submit/submit_with_invoice/',
-        ApplicationSuccessView.as_view(),
-        name='external-application-success-invoice'),
-    url(r'^application/finish_licence_fee_payment/',
-        LicenceFeeSuccessView.as_view(),
-        name='external-licence-fee-success-invoice'),
     url(r'^returns_submit/submit_with_invoice/',
         ReturnSuccessView.as_view(),
         name='external-returns-success-invoice'),
+    url(r'^returns/finish_sheet_fee_payment/',
+        ReturnSheetSuccessView.as_view(),
+        name='external-sheet-success-invoice'),
 
     # url(r'^export/xls/$', application_views.export_applications, name='export_applications'),
     url(r'^export/pdf/$', application_views.pdflatex, name='pdf_latex'),
@@ -267,11 +267,18 @@ urlpatterns = [
         application_views.ApplicationHistoryCompareView.as_view(),
         name='application-history'),
 
+    url(r'^preview/licence-pdf/(?P<application_pk>\d+)',application_views.PreviewLicencePDFView.as_view(), name='preview_licence_pdf'),
+
 ] + ledger_patterns
 
 if not are_migrations_running():
     CollectorManager()
 
 if settings.DEBUG:  # Serve media locally in development.
-    urlpatterns += static(settings.MEDIA_URL,
-                          document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+if settings.SHOW_DEBUG_TOOLBAR:
+    import debug_toolbar
+    urlpatterns = [
+        url('__debug__/', include(debug_toolbar.urls)),
+    ] + urlpatterns

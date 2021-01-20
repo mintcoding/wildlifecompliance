@@ -44,7 +44,13 @@
                           <div class="form-group">
                             <label for="" class="col-sm-3 control-label" >Date of Birth</label>
                             <div class="col-sm-6">
-                                <input type="date" class="form-control" name="dob" placeholder="" max="2100-12-31" v-model="current_user.dob">
+                                <!-- <input type="date" class="form-control" name="dob" placeholder="" max="2100-12-31" v-model="current_user.dob"> -->
+                                <div class="input-group date" ref="dob" style="width: 100%;">
+                                    <input type="text" class="form-control" name="dob" placeholder="DD/MM/YYYY" v-model="current_user.dob">
+                                    <span class="input-group-addon">
+                                        <span class="glyphicon glyphicon-calendar"></span>
+                                    </span>
+                                </div>
                             </div>
                           </div>
                           <div class="form-group">
@@ -62,6 +68,8 @@
             <div class="col-sm-12">
                 <div class="panel panel-default">
                   <div class="panel-heading">
+                    <i v-if="showCompletion && uploadedID" class="fa fa-check fa-2x pull-left" style="color:green"></i>
+                    <i v-else-if="!uploadedID" class="fa fa-times fa-2x pull-left" style="color:red"></i>
                     <h3 class="panel-title">Identification <small>Upload your photo ID</small>
                         <a class="panelClicker" :href="'#'+idBody" data-toggle="collapse"  data-parent="#userInfo" expanded="false" :aria-controls="idBody">
                             <span class="glyphicon glyphicon-chevron-down pull-right "></span>
@@ -71,20 +79,42 @@
                   <div class="panel-body collapse" :id="idBody">
                       <form class="form-horizontal" name="id_form" method="post">
                           <div class="form-group">
-                            <label for="" class="col-sm-3 control-label">Identification</label>
+                            <span class="col-sm-12" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Attach a scan of the photo page of your passport or the photo side of your drivers licence.</span>
+                          </div>
+                          <div class="form-group">
+                            <label class="col-sm-3 control-label">Identification</label>
                             <div class="col-sm-6">
-                                <img v-if="current_user.identification" width="100%" name="identification" v-bind:src="current_user.identification.file" />
+                                <span v-if="!uploadedID" class="btn btn-link btn-file pull-left">Attach File<input type="file" ref="uploadedID" @change="readFileID()"/></span>
+                                <span v-if="!uploadingID" class="btn btn-link btn-file pull-left"><a :href="'../media'+idFileName" target="_blank">{{uploadedID}}</a></span>
+                                <span v-else class="btn btn-link btn-file pull-left">&nbsp;Uploading...</span>
+                                <div>
+                                    <span v-if="uploadedID" class="btn btn-link btn-file pull-left">
+                                        <a @click="removeID()" class="fa fa-trash-o" title="Remove file" style="cursor: pointer; color:red;" />
+                                    </span>
+                                </div>
+                            </div>                            
+                          </div>
+                          <div class="form-group">
+                            <div class="col-sm-12">
+                                <!-- <div v-if="openIDFileTab">
+                                    <a :href="'../media'+idFileName" target="_blank">
+                                        [ View Image in New Tab ]
+                                    </a>         
+                                </div>
+                                <div v-else>    
+                                    <img v-if="current_user.identification" width="100%" name="identification" v-bind:src="current_user.identification.file" />
+                                </div> -->
                             </div>
                           </div>
                           <div class="form-group">
                             <div class="col-sm-12">
                                 <!-- output order in reverse due to pull-right at runtime -->
-                                <button v-if="!uploadingID" class="pull-right btn btn-primary" @click.prevent="uploadID()">Upload</button>
+                                <!-- <button v-if="!uploadingID" class="pull-right btn btn-primary" @click.prevent="uploadID()">Upload</button>
                                 <button v-else disabled class="pull-right btn btn-primary"><i class="fa fa-spin fa-spinner"></i>&nbsp;Uploading</button>
                                 <span class="pull-right" style="margin-left:10px;margin-top:10px;margin-right:10px">{{uploadedIDFileName}}</span>
                                 <span class="btn btn-primary btn-file pull-right">
                                     Select ID to Upload<input type="file" ref="uploadedID" @change="readFileID()"/>
-                                </span>
+                                </span> -->
                             </div>
                           </div>
                        </form>
@@ -162,7 +192,7 @@
                   <div class="panel-body collapse" :id="cBody">
                       <form class="form-horizontal" action="index.html" method="post">
                           <div class="form-group">
-                            <label for="" class="col-sm-3 control-label">Phone (work)</label>
+                            <label for="" class="col-sm-3 control-label">Phone</label>
                             <div class="col-sm-6">
                                 <input type="text" class="form-control" name="phone" placeholder="" v-model="current_user.phone_number">
                             </div>
@@ -221,11 +251,6 @@
                                 </div>
                             </div>
                           </div>
-
-                          
-
-
-
                           <div v-for="org in current_user.wildlifecompliance_organisations">
                               <div class="form-group">
                                 <label for="" class="col-sm-2 control-label" >Organisation</label>
@@ -288,7 +313,7 @@
                               </div>
                               <div class="form-group">
                                     <label class="col-sm-12" style="text-align:left;">
-                                      Please upload a letter on organisation letter head stating that you are a consultant for the organisation.
+                                      Please upload a letter with an organisation letterhead stating that you are a consultant for the organisation.
                                         <span class="btn btn-info btn-file">
                                             Atttach File <input type="file" ref="uploadedFile" @change="readFile()"/>
                                         </span>
@@ -347,7 +372,7 @@
                               </div>
                               <div class="form-group" v-else-if="!newOrg.exists && newOrg.detailsChecked">
                                   <label class="col-sm-12" style="text-align:left;">
-                                    This organisation has not yet been registered with this system. Please upload a letter on organisation head stating that you are an employee of this organisation.<br/>
+                                    This organisation has not yet been registered with this system. Please upload a letter with an organisation letterhead stating that you are an employee of this organisation.<br/>
                                   </label>
                                   <div class="col-sm-12">
                                     <span class="btn btn-info btn-file pull-left">
@@ -363,7 +388,7 @@
                               </div>
                               <div class="form-group" v-else-if="newOrg.exists && !newOrg.detailsChecked">
                                   <label class="col-sm-12" style="text-align:left;">
-                                    Please upload a letter on organisation head stating that you are an employee of this organisation.<br/>
+                                    Please upload a letter with an organisation letterhead stating that you are an employee of this organisation.<br/>
                                   </label>
                                   <div class="col-sm-12">
                                     <span class="btn btn-info btn-file pull-left">
@@ -432,7 +457,14 @@ export default {
             role:null,
             orgRequest_pending:[],
             orgRequest_amendment_requested:[],
-            new_user: false
+            new_user: false,
+            datepickerOptions:{
+                format: 'DD/MM/YYYY',
+                showClear:true,
+                useCurrent:false,
+                keepInvalid:true,
+                allowInputToggle:true
+            },
         }
     },
     watch: {
@@ -470,14 +502,21 @@ export default {
         uploadedFileName: function() {
             return this.uploadedFile != null ? this.uploadedFile.name: '';
         },
-        uploadedIDFileName: function() {
-            return this.uploadedID != null ? this.uploadedID.name: '';
-        },
+        // uploadedIDFileName: function() {
+        //     let id_file = this.current_user.identification != null ? this.current_user.identification.file.split('/media').pop() : '';
+        //     return this.uploadedID != null ? this.uploadedID.name: id_file;
+        // },
         showCompletion: function() {
             return this.$route.name == 'first-time'
         },
         completedProfile: function(){
-            return this.current_user.contact_details && this.current_user.personal_details && this.current_user.address_details;
+            return this.current_user.contact_details && this.current_user.personal_details && this.current_user.address_details && this.current_user.identification;
+        },
+        // openIDFileTab: function() {
+        //     return this.current_user.identification && !this.current_user.identification.file.includes('.png', '.jpeg', '.jpg', '.tiff');
+        // },
+        idFileName: function() {
+            return this.current_user.identification != null ? this.current_user.identification.file.split('/media').pop() : '';
         }
     },
     methods: {
@@ -495,7 +534,7 @@ export default {
             }
             vm.uploadedFile = _file;
         },
-        readFileID: function() {
+        readFileID: async function() {
             let vm = this;
             let _file = null;
             var input = $(vm.$refs.uploadedID)[0];
@@ -508,6 +547,7 @@ export default {
                 _file = input.files[0];
             }
             vm.uploadedID = _file;
+            await vm.uploadID();
         },
         addCompany: function (){
             this.newOrg.push = {
@@ -551,65 +591,36 @@ export default {
                 return;
             }
             if (vm.new_user == 'True') {
-                swal({
-                    title: "Update Personal Details",
-                    html: 'If you already have a Parks and Wildlife customer account under another email address, please ' +
-                        '<strong>log out and sign in again with that account</strong> and ' +
-                        'instead add <strong>' + vm.current_user.email + '</strong> as a new Profile.<br/><br/>If this is a new account, please proceed to update ' +
-                        'your details.',
-                    type: "question",
-                    allowOutsideClick: false,
-                    allowEscapeKey: false,
-                    confirmButtonText: 'Okay',
-                    showCancelButton: true,
-                    cancelButtonText: 'Logout',
-                    cancelButtonClass: 'btn btn-danger'
-                }).then((result) => {
-                    if (result.value) {
-                        vm.$http.post(helpers.add_endpoint_json(api_endpoints.users,(vm.current_user.id+'/update_personal')),JSON.stringify(vm.current_user),{
-                            emulateJSON:true
-                        }).then((response) => {
-                            swal({
-                                title: 'Update Personal Details',
-                                html: 'Your personal details has been successfully updated.',
-                                type: 'success',
-                            }).then(() => {
-                                vm.updatingPersonal = false;
-                                vm.current_user.personal_details = true;
-                                if (vm.completedProfile) {
-                                    vm.$http.get(api_endpoints.user_profile_completed).then((response) => {
-                                    },(error) => {
-                                    })
-                                }
-                            });
-                        }, (error) => {
-                            vm.updatingPersonal = false;
-                            vm.current_user.personal_details = false;
-                            let error_msg = '<br/>';
-                            for (var key in error.body) {
-                                if (key === 'dob') {
-                                    error_msg += 'dob: Please enter a valid date.<br/>';
-                                } else {
-                                    error_msg += key + ': ' + error.body[key] + '<br/>';
-                                }
-                            }
-                            swal({
-                                title: 'Update Personal Details',
-                                html: 'There was an error updating your personal details.<br/>' + error_msg,
-                                type: 'error'
-                            })
-                        });
-                    } else if (result.dismiss === swal.DismissReason.cancel) {
+                vm.$http.post(helpers.add_endpoint_json(api_endpoints.users,(vm.current_user.id+'/update_personal')),JSON.stringify(vm.current_user),{
+                    emulateJSON:true
+                }).then((response) => {
+                    swal({
+                        title: 'Update Personal Details',
+                        html: 'Your personal details has been successfully updated.',
+                        type: 'success',
+                    }).then(() => {
                         vm.updatingPersonal = false;
-                        vm.deleteUserLogout();
-                        return;
-                    }
+                        vm.current_user.personal_details = true;
+                        if (vm.completedProfile) {
+                            vm.$http.get(api_endpoints.user_profile_completed).then((response) => {
+                            },(error) => {
+                            })
+                        }
+                    });
                 }, (error) => {
                     vm.updatingPersonal = false;
                     vm.current_user.personal_details = false;
+                    let error_msg = '<br/>';
+                    for (var key in error.body) {
+                        if (key === 'dob') {
+                            error_msg += 'dob: Please enter a valid date.<br/>';
+                        } else {
+                            error_msg += key + ': ' + error.body[key] + '<br/>';
+                        }
+                    }
                     swal({
                         title: 'Update Personal Details',
-                        html: 'There was an error updating your personal details.',
+                        html: 'There was an error updating your personal details.<br/>' + error_msg,
                         type: 'error'
                     })
                 });
@@ -795,13 +806,14 @@ export default {
                 vm.validatingPins = false;
             });
         },
-        uploadID: function() {
+        removeID: async function() {
+            this.uploadedID = null;
+        },
+        uploadID: async function() {
             let vm = this;
-            console.log('uploading id');
             vm.uploadingID = true;
             let data = new FormData();
             data.append('identification', vm.uploadedID);
-            console.log(data);
             if (vm.uploadedID == null){
                 vm.uploadingID = false;
                 swal({
@@ -815,13 +827,16 @@ export default {
                 }).then((response) => {
                     vm.uploadingID = false;
                     vm.uploadedID = null;
-                    swal({
-                        title: 'Upload ID',
-                        html: 'Your ID has been successfully uploaded.',
-                        type: 'success',
-                    }).then(() => {
-                        window.location.reload(true);
-                    });
+                    vm.uploadedID = response.body.identification.file.split('/').pop();
+                    vm.current_user.identification = response.body.identification
+                    // swal({
+                    //     title: 'Upload ID',
+                    //     html: 'Your ID has been successfully uploaded.',
+                    //     type: 'success',
+                    // });
+                    // }).then(() => {
+                    //     window.location.reload(true);
+                    // });
                 }, (error) => {
                     console.log(error);
                     vm.uploadingID = false;
@@ -1072,6 +1087,19 @@ export default {
             },(error) => {
             })
         },
+        eventListeners:function () {
+            const self = this
+            let _dob = 'dob';
+            $(`[name='${_dob}']`).datetimepicker(self.datepickerOptions);
+            $(`[name='${_dob}']`).on('dp.change', function(e){
+                if ($(`[name='${_dob}']`).data('DateTimePicker').date()) {
+                    self.current_user.dob =  e.date.format('DD/MM/YYYY');
+                }
+                else if ($(`[name='${_dob}']`).data('date') === "") {
+                    self.current_user.dob = "";
+                }
+            });
+        },
     },
     beforeRouteEnter: function(to,from,next){
         Vue.http.get(api_endpoints.my_user_details).then((response) => {
@@ -1083,6 +1111,7 @@ export default {
                     vm.current_user = response.body
                     if (vm.current_user.residential_address == null){ vm.current_user.residential_address = {}; }
                     if (vm.current_user.wildlifecompliance_organisations && vm.current_user.wildlifecompliance_organisations.length > 0) { vm.managesOrg = 'Yes' }
+                    if (vm.current_user.identification){ vm.uploadedID = vm.current_user.identification.file.split('/').pop(); }
                 });
             }
         },(error) => {
@@ -1102,6 +1131,9 @@ export default {
         Vue.http.get(api_endpoints.is_new_user).then((response) => {
             this.new_user = response.body;
         })
+        this.$nextTick(()=>{
+            this.eventListeners();
+        });
     }
 }
 </script>

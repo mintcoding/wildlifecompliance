@@ -37,6 +37,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class PreviewLicencePDFView(View):
+    def post(self, request, *args, **kwargs):
+        response = HttpResponse(content_type='application/pdf')
+
+        application = self.get_object()
+        response.write(application.preview_final_decision(request))
+        return response
+
+    def get_object(self):
+        return get_object_or_404(Application, id=self.kwargs['application_pk'])
+
+
 class ApplicationHistoryCompareView(HistoryCompareDetailView):
     """
     View for reversion_compare
@@ -95,13 +107,9 @@ class ApplicationSuccessView(TemplateView):
                         kwargs={'reference': invoice_ref}))
 
                 if application.application_fee_paid:
-                    # can only submit again if application is in Draft.
-                    if application.can_user_edit:
-                        application.submit(request)
-                    send_application_invoice_email_notification(
-                        application, invoice_ref, request)
 
-                    # record invoice payment for licence activities.
+                    # record invoice payment for licence activities. Record the
+                    # licence and application fee for refunding purposes.
                     for activity in application.activities:
 
                         invoice = ActivityInvoice.objects.get_or_create(
@@ -109,17 +117,57 @@ class ApplicationSuccessView(TemplateView):
                             invoice_reference=invoice_ref
                         )
 
-                        ActivityInvoiceLine.objects.get_or_create(
-                            invoice=invoice[0],
-                            licence_activity=activity.licence_activity,
-                            amount=activity.licence_fee
+                        paid_purposes = [
+                            p for p in activity.proposed_purposes.all()
+                            if p.is_payable
+                        ]
+
+                        inv_lines = []
+
+                        for p in paid_purposes:
+
+                            fee = p.get_payable_licence_fee()
+                            l_type = ActivityInvoiceLine.LINE_TYPE_LICENCE
+
+                            inv_lines.append(ActivityInvoiceLine(
+                                invoice=invoice[0],
+                                licence_activity=activity.licence_activity,
+                                licence_purpose=p.purpose,
+                                invoice_line_type=l_type,
+                                amount=fee
+                            ))
+
+                            fee = p.get_payable_application_fee()
+                            l_type = ActivityInvoiceLine.LINE_TYPE_APPLICATION
+
+                            inv_lines.append(ActivityInvoiceLine(
+                                invoice=invoice[0],
+                                licence_activity=activity.licence_activity,
+                                licence_purpose=p.purpose,
+                                invoice_line_type=l_type,
+                                amount=fee
+                            ))
+
+                            fee = p.additional_fee
+                            l_type = ActivityInvoiceLine.LINE_TYPE_ADDITIONAL
+
+                            inv_lines.append(ActivityInvoiceLine(
+                                invoice=invoice[0],
+                                licence_activity=activity.licence_activity,
+                                licence_purpose=p.purpose,
+                                invoice_line_type=l_type,
+                                amount=fee
+                            ))
+
+                        ActivityInvoiceLine.objects.bulk_create(
+                            inv_lines
                         )
 
-                        ActivityInvoiceLine.objects.get_or_create(
-                            invoice=invoice[0],
-                            licence_activity=activity.licence_activity,
-                            amount=activity.application_fee
-                        )
+                    # can only submit again if application is in Draft.
+                    if application.can_user_edit:
+                        application.submit(request)
+                    send_application_invoice_email_notification(
+                        application, invoice_ref, request)
 
                 else:
                     # TODO: check if this ever occurs from the above code and
@@ -155,38 +203,101 @@ class LicenceFeeSuccessView(TemplateView):
     template_name = 'wildlifecompliance/licence_fee_success.html'
 
     def get(self, request, *args, **kwargs):
+        from wildlifecompliance.components.applications.payments import (
+            LicenceFeeClearingInvoice
+        )
+        ACCEPTED = ApplicationSelectedActivity.PROCESSING_STATUS_ACCEPTED
         try:
             session_activity = get_session_activity(request.session)
             invoice_ref = request.GET.get('invoice')
 
+            application = Application.objects.get(
+                id=session_activity.application_id
+            )
+
+            bind_application_to_invoice(request, application, invoice_ref)
             activities = ApplicationSelectedActivity.objects.filter(
                 application_id=session_activity.application_id,
                 processing_status=ApplicationSelectedActivity.PROCESSING_STATUS_AWAITING_LICENCE_FEE_PAYMENT)
 
             i = 1
             for activity in activities:
+                # For each activity record the invoice ref and application fee
+                # paid as this amount may need to be refunded.
 
                 invoice = ActivityInvoice.objects.get_or_create(
                     activity=activity,
                     invoice_reference=invoice_ref
                 )
 
-                # Licence Fee is paid upfront.
-                # if activity.licence_fee > 0:
+                paid_purposes = [
+                    p for p in activity.proposed_purposes.all()
+                    if p.is_payable
+                ]
+
+                inv_lines = []
+
+                for p in paid_purposes:
+
+                    # Check if refund is required and can be included.
+                    # clear_inv = LicenceFeeClearingInvoice(application)
+
+                    fee = p.additional_fee
+                    l_type = ActivityInvoiceLine.LINE_TYPE_ADDITIONAL
+
+                    if fee > -1:
+                        inv_lines.append(ActivityInvoiceLine(
+                            invoice=invoice[0],
+                            licence_activity=activity.licence_activity,
+                            licence_purpose=p.purpose,
+                            invoice_line_type=l_type,
+                            amount=fee
+                        ))
+
+                    fee = p.adjusted_licence_fee
+                    l_type = ActivityInvoiceLine.LINE_TYPE_LICENCE
+
+                    if fee > -1:
+
+                        inv_lines.append(ActivityInvoiceLine(
+                            invoice=invoice[0],
+                            licence_activity=activity.licence_activity,
+                            licence_purpose=p.purpose,
+                            invoice_line_type=l_type,
+                            amount=fee
+                        ))
+
+                    fee = p.get_payable_application_fee()
+                    l_type = ActivityInvoiceLine.LINE_TYPE_APPLICATION
+
+                    if fee > -1:
+                        inv_lines.append(ActivityInvoiceLine(
+                            invoice=invoice[0],
+                            licence_activity=activity.licence_activity,
+                            licence_purpose=p.purpose,
+                            invoice_line_type=l_type,
+                            amount=fee
+                        ))
+
+                    # if clear_inv.is_refundable:
+                    #     inv_lines.append(
+                    #         clear_inv.get_invoice_line_refund_for(
+                    #             p, invoice[0])
+                    #     )
+
+                ActivityInvoiceLine.objects.bulk_create(
+                    inv_lines
+                )
+
+                # There may be adjustments to application fee.
+                # if activity.application_fee > 0:
                 #     ActivityInvoiceLine.objects.get_or_create(
                 #         invoice=invoice[0],
                 #         licence_activity=activity.licence_activity,
-                #         amount=activity.licence_fee
+                #         amount=activity.application_fee
                 #     )
-
-                # There may be adjustments to application fee.
-                if activity.application_fee > 0:
-                    ActivityInvoiceLine.objects.get_or_create(
-                        invoice=invoice[0],
-                        licence_activity=activity.licence_activity,
-                        amount=activity.application_fee
-                    )
-
+                # update the status from awaiting fee payment.
+                activity.processing_status = ACCEPTED
                 activity.application.issue_activity(
                    request, activity,
                    generate_licence=True if i == activities.count() else False)
@@ -296,7 +407,8 @@ def pdflatex(request):
         return error_response
 
     with open(directory + texname, "w") as f:
-        f.write(output.encode('utf-8'))
+        # f.write(output.encode('utf-8'))
+        f.write(output)
         logger.debug("Writing to {}".format(directory + texname))
 
     #import ipdb; ipdb.set_trace()

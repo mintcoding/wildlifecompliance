@@ -1,3 +1,4 @@
+import os
 from django.conf import settings
 from ledger.accounts.models import EmailUser, Address, Profile, EmailIdentity, EmailUserAction, Document
 from wildlifecompliance.components.organisations.models import (
@@ -11,7 +12,12 @@ from wildlifecompliance.components.users.models import (
         ComplianceManagementUserPreferences
         )
 from wildlifecompliance.components.organisations.utils import can_admin_org, is_consultant
-from wildlifecompliance.helpers import is_customer, is_internal
+from wildlifecompliance.helpers import (
+    is_customer,
+    is_internal,
+    is_reception,
+    is_wildlifecompliance_payment_officer,
+)
 from rest_framework import serializers
 from django.core.exceptions import ValidationError
 from rest_framework.fields import CurrentUserDefault
@@ -248,6 +254,7 @@ class UserSerializer(serializers.ModelSerializer):
     contact_details = serializers.SerializerMethodField()
     wildlifecompliance_organisations = serializers.SerializerMethodField()
     identification = DocumentSerializer()
+    dob = serializers.SerializerMethodField()
 
     class Meta:
         model = EmailUser
@@ -270,6 +277,13 @@ class UserSerializer(serializers.ModelSerializer):
             'address_details',
             'contact_details'
         )
+
+    def get_dob(self, obj):
+        formatted_date = obj.dob.strftime(
+            '%d/%m/%Y'
+        ) if obj.dob else None
+
+        return formatted_date
 
     def get_personal_details(self, obj):
         return True if obj.last_name and obj.first_name and obj.dob else False
@@ -324,10 +338,14 @@ class MyUserDetailsSerializer(serializers.ModelSerializer):
     address_details = serializers.SerializerMethodField()
     contact_details = serializers.SerializerMethodField()
     wildlifecompliance_organisations = serializers.SerializerMethodField()
-    identification = DocumentSerializer()
+    # identification = DocumentSerializer()
     is_customer = serializers.SerializerMethodField()
     is_internal = serializers.SerializerMethodField()
     prefer_compliance_management = serializers.SerializerMethodField()
+    is_reception = serializers.SerializerMethodField()
+    dob = serializers.SerializerMethodField(read_only=True)
+    identification = serializers.SerializerMethodField(read_only=True)
+    is_payment_officer = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = EmailUser
@@ -350,7 +368,31 @@ class MyUserDetailsSerializer(serializers.ModelSerializer):
             'is_customer',
             'is_internal',
             'prefer_compliance_management',
+            'is_reception',
+            'is_payment_officer',
         )
+
+    def get_is_payment_officer(self, obj):
+        is_officer = is_wildlifecompliance_payment_officer(
+            self.context.get('request')
+        )
+        return is_officer
+
+    def get_identification(self, obj):
+        uid = None
+        if obj.identification:
+            id_file = 'media/' + str(obj.identification.file)
+            if os.path.exists(id_file):
+                uid = DocumentSerializer(obj.identification).data
+
+        return uid
+
+    def get_dob(self, obj):
+        formatted_date = obj.dob.strftime(
+            '%d/%m/%Y'
+        ) if obj.dob else None
+
+        return formatted_date
 
     def get_personal_details(self, obj):
         return True if obj.last_name and obj.first_name and obj.dob else False
@@ -386,6 +428,9 @@ class MyUserDetailsSerializer(serializers.ModelSerializer):
             return obj.compliancemanagementuserpreferences.prefer_compliance_management
         else:
             return False
+
+    def get_is_reception(self, obj):
+        return is_reception(self.context.get('request'))
 
 
 class ComplianceUserDetailsSerializer(serializers.ModelSerializer):
@@ -472,6 +517,12 @@ class EmailUserActionSerializer(serializers.ModelSerializer):
 
 
 class PersonalSerializer(serializers.ModelSerializer):
+    dob = serializers.DateField(
+        input_formats=['%d/%m/%Y'],
+        required=False,
+        allow_null=True
+    )
+
     class Meta:
         model = EmailUser
         fields = (
@@ -565,4 +616,3 @@ class CompliancePermissionGroupDetailedSerializer(serializers.ModelSerializer):
         for permission in obj.permissions.all():
             permissions_list.append(permission.codename)
         return permissions_list
-
